@@ -1,0 +1,36 @@
+{
+  "paths": {
+    "input_file": "data/input/ReZero_Watching_Him_Die.txt",
+    "en_chapters_dir": "data/en_chapters",
+    "cn_chapters_dir": "data/cn_chapters",
+    "manifest_file": "data/manifests/translation_manifest.json"
+  },
+  "chapter_split": {
+    "strict_chapter_sequence": true,
+    "min_valid_chapter_chars": 3000
+  },
+  "lmstudio": {
+    "base_url": "http://localhost:1234/v1",
+    "api_key": "lm-studio",
+    "model_id": "auto",
+    "temperature": 0.2,
+    "top_p": 0.85,
+    "max_output_tokens": 4096,
+    "request_timeout_seconds": 600,
+    "max_retries": 3,
+    "retry_sleep_seconds": 5
+  },
+  "chunking": {
+    "context_tokens": 8192,
+    "reserved_prompt_tokens": 1800,
+    "reserved_output_tokens": 4096,
+    "safety_ratio": 0.72,
+    "english_chars_per_token": 4.0,
+    "cjk_chars_per_token": 1.2
+  },
+  "translation": {
+    "skip_existing_done_chapters": true,
+    "write_partial_file": true,
+    "strip_model_preamble": true
+  }
+}

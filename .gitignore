@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Local input/output data
+data/input/*
+!data/input/.gitkeep
+
+data/en_chapters/*
+!data/en_chapters/.gitkeep
+
+data/cn_chapters/*
+!data/cn_chapters/.gitkeep
+
+data/manifests/*
+!data/manifests/.gitkeep
+
+# Runtime temporary files
+*.partial.txt
+*.tmp
+*.lock
+
+# Editor
+.vscode/
+.idea/
