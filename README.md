@@ -147,3 +147,65 @@ python -m src.youshengshu.cli translate --config config/default_config.json
 ### 使用 Qwen3 模型
 
 如果你使用 Qwen3 系列模型，可以在提示词中加入 `/no_think` 来禁用思考输出。本程序默认不加。
+
+## CLI JSON 输出
+
+CLI 支持机器可读的 JSON 输出，供桌面 UI 使用。
+
+### 分章节 --json
+
+```bash
+python -m src.youshengshu.cli split --config config/default_config.json --json
+```
+
+输出 JSON 包含 `source`、`chapters`、`en_chapters_dir`、`manifest_file`。
+
+### 查看进度 --json
+
+```bash
+python -m src.youshengshu.cli status --config config/default_config.json --json
+```
+
+输出 JSON 包含 `total`、`done`、`pending`、`failed`、`in_progress`、`next_chapter`、`chapters` 数组等详细信息。
+
+### 仅翻译指定章数
+
+```bash
+python -m src.youshengshu.cli translate --config config/default_config.json --max-chapters 1
+```
+
+`--max-chapters` 指定最大翻译章节数（0 表示全部）。可用于先试跑一章。
+
+## 图形界面（桌面 UI）
+
+项目附带一个基于 **Tauri v2 + React + TypeScript + shadcn/ui** 的桌面图形界面。
+
+### 前置要求
+
+- Node.js >= 18
+- Rust 工具链（含 cargo）
+- Windows 平台需要 Windows SDK（Visual Studio Build Tools 或 VS 2022）
+
+### 启动
+
+```bash
+cd desktop
+npm install
+npm run tauri dev
+```
+
+### 功能
+
+- 路径设置：图形化选择原始 TXT 文件、英文分章目录、中文译文目录、manifest 路径
+- 项目根目录自动识别
+- 一键分章节、开始翻译、刷新状态、翻译下一章
+- 章节进度状态卡片和表格
+- 实时日志控制台
+- 打开英文/中文目录
+- 支持停止当前翻译任务
+
+### 注意
+
+- CLI 和 UI 共用同一套 `config/default_config.json` 配置
+- UI 不会提交原文和译文
+- UI 调用的是现有 Python 后端，不重写翻译逻辑

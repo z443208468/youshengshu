@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -9,7 +10,25 @@ from .progress import TranslationManifest
 from .translator import run_translation_pipeline
 
 
-def cmd_split(config_path: str) -> None:
+def _build_status_json(manifest: TranslationManifest) -> dict:
+    summary = manifest.get_summary()
+    chapters = [ch.to_dict() for ch in manifest.chapters]
+    return {
+        "total": summary["total"],
+        "done": summary["done"],
+        "pending": summary["pending"],
+        "failed": summary["failed"],
+        "in_progress": summary["in_progress"],
+        "next_chapter": summary["next_chapter"],
+        "failed_list": [
+            {"index": idx, "en_path": ep, "error": err}
+            for idx, ep, err in summary["failed_list"]
+        ],
+        "chapters": chapters,
+    }
+
+
+def cmd_split(config_path: str, as_json: bool = False) -> None:
     config = load_config(config_path)
 
     input_path = Path(config.paths.input_file)
@@ -37,6 +56,16 @@ def cmd_split(config_path: str) -> None:
     manifest_path = Path(config.paths.manifest_file)
     manifest.save(manifest_path)
 
+    if as_json:
+        payload = {
+            "source": str(input_path),
+            "chapters": len(chapters),
+            "en_chapters_dir": str(en_dir),
+            "manifest_file": str(manifest_path),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
     print("Split completed.")
     print(f"Source: {input_path}")
     print(f"Chapters: {len(chapters)}")
@@ -44,7 +73,7 @@ def cmd_split(config_path: str) -> None:
     print(f"Manifest: {manifest_path}")
 
 
-def cmd_translate(config_path: str) -> None:
+def cmd_translate(config_path: str, max_chapters: int = 0) -> None:
     config = load_config(config_path)
 
     manifest_path = Path(config.paths.manifest_file)
@@ -69,7 +98,7 @@ def cmd_translate(config_path: str) -> None:
         print(f"[ERROR] {e}")
         sys.exit(1)
 
-    results = run_translation_pipeline(config, client, manifest)
+    results = run_translation_pipeline(config, client, manifest, max_chapters=max_chapters)
 
     if not results:
         summary = manifest.get_summary()
@@ -83,17 +112,26 @@ def cmd_translate(config_path: str) -> None:
     print(f"\n翻译完成: {len(results)} 章")
 
 
-def cmd_status(config_path: str) -> None:
+def cmd_status(config_path: str, as_json: bool = False) -> None:
     config = load_config(config_path)
 
     manifest_path = Path(config.paths.manifest_file)
     if not manifest_path.exists():
-        print(
-            "[ERROR] Manifest 文件不存在。请先运行 split 命令。"
-        )
+        if as_json:
+            print(json.dumps({"error": "Manifest 文件不存在。请先运行 split 命令。"}, ensure_ascii=False))
+        else:
+            print(
+                "[ERROR] Manifest 文件不存在。请先运行 split 命令。"
+            )
         sys.exit(1)
 
     manifest = TranslationManifest.load(manifest_path)
+
+    if as_json:
+        payload = _build_status_json(manifest)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
     summary = manifest.get_summary()
 
     print(f"Total chapters: {summary['total']}")
@@ -128,20 +166,41 @@ def main() -> None:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("split", help="按章节切分 TXT 文件")
-    subparsers.add_parser("translate", help="批量翻译（支持续跑）")
-    subparsers.add_parser("status", help="查看当前翻译进度")
+    split_parser = subparsers.add_parser("split", help="按章节切分 TXT 文件")
+    split_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="以 JSON 格式输出结果",
+    )
+
+    translate_parser = subparsers.add_parser("translate", help="批量翻译（支持续跑）")
+    translate_parser.add_argument(
+        "--max-chapters",
+        type=int,
+        default=0,
+        help="最大翻译章节数 (0 表示全部)",
+    )
+
+    status_parser = subparsers.add_parser("status", help="查看当前翻译进度")
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="以 JSON 格式输出结果",
+    )
+
     subparsers.add_parser("all", help="执行 split + translate")
 
     args = parser.parse_args()
 
     try:
         if args.command == "split":
-            cmd_split(args.config)
+            cmd_split(args.config, as_json=getattr(args, "json_output", False))
         elif args.command == "translate":
-            cmd_translate(args.config)
+            cmd_translate(args.config, max_chapters=getattr(args, "max_chapters", 0))
         elif args.command == "status":
-            cmd_status(args.config)
+            cmd_status(args.config, as_json=getattr(args, "json_output", False))
         elif args.command == "all":
             cmd_all(args.config)
     except YoushengshuError as e:
