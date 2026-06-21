@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::Emitter;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, Command};
 
@@ -241,12 +241,6 @@ async fn run_python_cli(
         .spawn()
         .map_err(|e| format!("启动进程失败: {e}"))?;
 
-    // Store handle for potential kill
-    {
-        let mut guard = state.0.lock().unwrap();
-        *guard = Some(child.try_wait().unwrap_or(None));
-    }
-
     let stdout_handle = child
         .stdout
         .take()
@@ -303,22 +297,17 @@ async fn run_python_cli(
     let stdout = stdout.unwrap_or_default();
     let stderr = stderr.unwrap_or_default();
 
-    // Wait for process to finish
-    let status = {
+    // Take the child out of the mutex so we can wait without holding the lock
+    let mut child_to_wait = {
         let mut guard = state.0.lock().unwrap();
-        if let Some(ref mut child) = *guard {
-            child.wait().await.unwrap_or_default()
-        } else {
-            std::process::ExitStatus::default()
-        }
+        guard.take()
+    };
+    let status = if let Some(ref mut child) = child_to_wait {
+        child.wait().await.unwrap_or_default()
+    } else {
+        std::process::ExitStatus::default()
     };
     let code = status.code().unwrap_or(-1);
-
-    // Clear stored process
-    {
-        let mut guard = state.0.lock().unwrap();
-        *guard = None;
-    }
 
     Ok(ProcessOutput { code, stdout, stderr })
 }
@@ -329,13 +318,16 @@ async fn run_python_cli(
 async fn kill_python_process(
     state: tauri::State<'_, ActiveProcess>,
 ) -> Result<(), String> {
-    let mut guard = state.0.lock().unwrap();
-    if let Some(ref mut child) = *guard {
+    // Take the child out of the mutex so we can kill without holding the lock
+    let child_to_kill = {
+        let mut guard = state.0.lock().unwrap();
+        guard.take()
+    };
+    if let Some(mut child) = child_to_kill {
         child
             .kill()
             .await
             .map_err(|e| format!("终止进程失败: {e}"))?;
-        *guard = None;
     }
     Ok(())
 }
