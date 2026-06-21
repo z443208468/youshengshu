@@ -9,6 +9,7 @@ use tokio::process::{Child, Command};
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct UiPaths {
     repo_root: String,
     config_path: String,
@@ -119,6 +120,23 @@ fn read_youshengshu_config(config_path: String) -> Result<serde_json::Value, Str
 /// schema and keeping all non-path/non-lmstudio fields.
 #[tauri::command]
 fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
+    if paths.repo_root.trim().is_empty() {
+        return Err("项目根目录 repoRoot 为空，请先在 UI 中选择仓库根目录".to_string());
+    }
+
+    let repo_root_path = std::path::Path::new(&paths.repo_root);
+    let cli_path = repo_root_path.join("src").join("youshengshu").join("cli.py");
+    if !cli_path.exists() {
+        return Err(format!(
+            "项目根目录无效，未找到 Python CLI: {}。请选择包含 src/youshengshu/cli.py 的仓库根目录。",
+            cli_path.display()
+        ));
+    }
+
+    if paths.config_path.trim().is_empty() {
+        return Err("配置文件路径为空，请设置 config/default_config.json 或选择配置文件路径".to_string());
+    }
+
     let config_path = std::path::Path::new(&paths.config_path);
 
     // Try to load existing config to preserve non-overridden fields
@@ -211,9 +229,26 @@ async fn run_python_cli(
         return Err(format!("不允许的命令: {}", cli_command));
     }
 
-    let src_dir = format!("{}/src", repo_root);
+    if repo_root.trim().is_empty() {
+        return Err("项目根目录 repoRoot 为空，请先在 UI 中选择仓库根目录".to_string());
+    }
+
+    let repo_root_path = std::path::PathBuf::from(&repo_root);
+    let cli_path = repo_root_path.join("src").join("youshengshu").join("cli.py");
+    if !cli_path.exists() {
+        return Err(format!(
+            "项目根目录无效，未找到 Python CLI: {}。请选择包含 src/youshengshu/cli.py 的仓库根目录。",
+            cli_path.display()
+        ));
+    }
+
+    if config_path.trim().is_empty() {
+        return Err("配置文件路径为空，请设置 config/default_config.json 或选择配置文件路径".to_string());
+    }
+
+    let src_dir = repo_root_path.join("src");
     let mut cmd = Command::new(&python_command);
-    cmd.current_dir(&repo_root)
+    cmd.current_dir(&repo_root_path)
         .env("PYTHONPATH", &src_dir)
         .arg("-m")
         .arg("youshengshu.cli")

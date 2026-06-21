@@ -89,7 +89,18 @@ export default function App() {
     setLogs([]);
   }, []);
 
+  const validateRepoRoot = useCallback(() => {
+    if (!settings.repoRoot.trim()) {
+      appendLog("stderr", "项目根目录为空，请先选择包含 src/youshengshu/cli.py 的仓库根目录。");
+      toast.show("请先选择项目根目录", "error");
+      return false;
+    }
+    return true;
+  }, [settings.repoRoot, appendLog, toast]);
+
   const saveConfig = useCallback(async () => {
+    if (!validateRepoRoot()) return;
+
     appendLog("system", "保存配置...");
     try {
       await writeConfig(settings);
@@ -99,9 +110,11 @@ export default function App() {
       appendLog("stderr", `保存配置失败: ${err}`);
       toast.show(`保存配置失败: ${err}`, "error");
     }
-  }, [settings, appendLog, toast]);
+  }, [settings, appendLog, toast, validateRepoRoot]);
 
   const refreshStatus = useCallback(async () => {
+    if (!validateRepoRoot()) return;
+
     setTaskState("refreshing");
     appendLog("system", "刷新状态...");
     try {
@@ -143,9 +156,11 @@ export default function App() {
       toast.show(`刷新状态失败: ${err}`, "error");
     }
     setTaskState("idle");
-  }, [settings, appendLog, toast]);
+  }, [settings, appendLog, toast, validateRepoRoot]);
 
   const runSplit = useCallback(async () => {
+    if (!validateRepoRoot()) return;
+
     setTaskState("splitting");
     clearLogs();
     appendLog("system", "保存配置...");
@@ -189,9 +204,11 @@ export default function App() {
       return;
     }
     setTaskState("idle");
-  }, [settings, clearLogs, appendLog, refreshStatus, toast]);
+  }, [settings, clearLogs, appendLog, refreshStatus, toast, validateRepoRoot]);
 
   const runTranslate = useCallback(async () => {
+    if (!validateRepoRoot()) return;
+
     setTaskState("translating");
     appendLog("system", "保存配置...");
     try {
@@ -236,9 +253,11 @@ export default function App() {
       return;
     }
     setTaskState("idle");
-  }, [settings, appendLog, refreshStatus, currentModel, toast]);
+  }, [settings, appendLog, refreshStatus, currentModel, toast, validateRepoRoot]);
 
   const runTranslateNext = useCallback(async () => {
+    if (!validateRepoRoot()) return;
+
     setTaskState("translating");
     appendLog("system", "保存配置...");
     try {
@@ -276,14 +295,14 @@ export default function App() {
       return;
     }
     setTaskState("idle");
-  }, [settings, appendLog, refreshStatus, toast]);
+  }, [settings, appendLog, refreshStatus, toast, validateRepoRoot]);
 
   const stopTask = useCallback(async () => {
     appendLog("system", "正在停止当前任务...");
     try {
       await killPythonProcess();
-      appendLog("system", "任务已停止");
-      toast.show("任务已停止", "info");
+      appendLog("system", "已发送停止信号；如果模型进程仍在清理，请等待日志结束。");
+      toast.show("已发送停止信号", "info");
     } catch (err) {
       appendLog("stderr", `停止任务失败: ${err}`);
       toast.show("停止任务失败", "error");
