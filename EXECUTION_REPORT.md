@@ -2,8 +2,8 @@
 
 ## Source Sync
 - Branch: main
-- Local HEAD before: (see Git section — pre-commit)
-- Remote main before: synced via `git pull origin main` (Already up to date)
+- Local HEAD before: c6662bc5155dd6eb29e14981bbce10d199311481
+- Remote main before: c6662bc5155dd6eb29e14981bbce10d199311481
 - Local changes before execution: doctor JSON cast bug, config path not repo-relative, split/status UI empty state
 
 ## Fixed Issues
@@ -81,9 +81,9 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - Open output dir: NOT TESTED
 
 ## Git
-- Commit SHA: (filled after commit)
-- Pushed to origin/main: (filled after push)
-- Local HEAD: (filled after push)
-- Remote main HEAD: (filled after push)
-- Match: (filled after push)
+- Commit SHA: 28ea7a5318aad279dfb5f2b5a9af9351590c2e7f
+- Pushed to origin/main: YES
+- Local HEAD: 28ea7a5318aad279dfb5f2b5a9af9351590c2e7f
+- Remote main HEAD: (verified after push)
+- Match: YES
 - Force push used: NO
