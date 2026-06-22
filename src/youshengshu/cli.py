@@ -68,9 +68,13 @@ def cmd_split(config_path: str, as_json: bool = False) -> None:
     if as_json:
         payload = {
             "source": str(input_path),
+            "source_absolute": str(input_path.resolve()),
             "chapters": len(chapters),
             "en_chapters_dir": str(en_dir),
+            "en_chapters_dir_absolute": str(en_dir.resolve()),
             "manifest_file": str(manifest_path),
+            "manifest_file_absolute": str(manifest_path.resolve()),
+            "cwd": str(Path.cwd()),
         }
         print_json(payload)
         return
@@ -129,12 +133,22 @@ def cmd_status(config_path: str, as_json: bool = False) -> None:
     manifest_path = Path(config.paths.manifest_file)
     if not manifest_path.exists():
         if as_json:
-            print_json({"error": "Manifest 文件不存在。请先运行 split 命令。"})
+            print_json({
+                "error": "Manifest 文件不存在。请先运行 split 命令。",
+                "config_path": str(config_path),
+                "manifest_file": str(manifest_path),
+                "manifest_file_absolute": str(manifest_path.resolve()),
+                "cwd": str(Path.cwd()),
+            })
         else:
             print(
                 "[ERROR] Manifest 文件不存在。请先运行 split 命令。",
                 file=sys.stderr,
             )
+            print(f"Config: {config_path}", file=sys.stderr)
+            print(f"Manifest: {manifest_path}", file=sys.stderr)
+            print(f"Manifest absolute: {manifest_path.resolve()}", file=sys.stderr)
+            print(f"CWD: {Path.cwd()}", file=sys.stderr)
         sys.exit(1)
 
     manifest = TranslationManifest.load(manifest_path)

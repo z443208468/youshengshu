@@ -37,9 +37,11 @@ export async function resolvePath(
 }
 
 export async function readConfig(
+  repoRoot: string,
   configPath: string,
 ): Promise<Record<string, unknown>> {
   return invoke<Record<string, unknown>>("read_youshengshu_config", {
+    repoRoot,
     configPath,
   });
 }

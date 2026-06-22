@@ -36,9 +36,17 @@ set INCLUDE=%MSVC_ROOT%\include;%SDK_ROOT%\Include\%SDK_VER%\ucrt;%SDK_ROOT%\Inc
 exit /b 0
 
 :msvc_missing
-echo [WARN] MSVC toolchain folder not found under %VS_ROOT%
+echo [WARN] MSVC toolchain folder not found
+echo [WARN] VS_ROOT=%VS_ROOT%
+echo [WARN] SDK_ROOT=%SDK_ROOT%
+echo [WARN] MSVC_VER=%MSVC_VER%
+echo [WARN] SDK_VER=%SDK_VER%
 exit /b 1
 
 :sdk_missing
-echo [WARN] Windows SDK libraries not found under %SDK_ROOT%
+echo [WARN] Windows SDK libraries not found
+echo [WARN] VS_ROOT=%VS_ROOT%
+echo [WARN] SDK_ROOT=%SDK_ROOT%
+echo [WARN] MSVC_VER=%MSVC_VER%
+echo [WARN] SDK_VER=%SDK_VER%
 exit /b 1

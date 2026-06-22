@@ -23,7 +23,12 @@ import {
   createLogLine,
 } from "@/lib/tauri";
 import { DEFAULT_SETTINGS, LOG_VIEW_MAX_LINES } from "@/lib/config";
-import { parseStatusJson, parseSplitJson } from "@/lib/status";
+import {
+  parseDoctorJson,
+  parseStatusJson,
+  parseSplitJson,
+  parseStatusErrorJson,
+} from "@/lib/status";
 import type {
   UiSettings,
   TaskState,
@@ -42,6 +47,7 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [health, setHealth] = useState<DoctorPayload | null>(null);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
+  const [logFilePath, setLogFilePath] = useState<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
   const toast = useToast();
 
@@ -103,6 +109,11 @@ export default function App() {
           jsonOutput: true,
         });
 
+        setLastCommand(result.commandLine);
+        if (result.logFilePath) {
+          setLogFilePath(result.logFilePath);
+        }
+
         appendLog("system", `doctor exit code: ${result.code}`);
         appendLog("system", `doctor stdout length: ${result.stdout?.length ?? 0}`);
         appendLog("system", `doctor stderr length: ${result.stderr?.length ?? 0}`);
@@ -118,7 +129,7 @@ export default function App() {
 
         let payload: DoctorPayload;
         try {
-          payload = JSON.parse(result.stdout) as DoctorPayload;
+          payload = parseDoctorJson(result.stdout);
         } catch (err) {
           appendLog("stderr", `doctor JSON 解析失败: ${String(err)}`);
           appendLog("stderr", `doctor stdout 原文: ${result.stdout}`);
@@ -130,6 +141,10 @@ export default function App() {
         }
 
         setHealth(payload);
+        appendLog(
+          "system",
+          `能力状态: 分章节=${payload.canSplit ? "可用" : "不可用"}, 翻译=${payload.canTranslate ? "可用" : "不可用"}`,
+        );
 
         if (payload.ok) {
           appendLog("system", "系统诊断: 正常");
@@ -187,7 +202,7 @@ export default function App() {
 
         // Step 2: read config and merge
         try {
-          const config = await readConfig(context.configPath);
+          const config = await readConfig(context.repoRoot, context.configPath);
           const merged = mergeConfigIntoSettings(context, config);
           setSettings(merged);
           appendLog("system", "配置已加载");
@@ -262,6 +277,11 @@ export default function App() {
     return true;
   }, [settings.repoRoot, appendLog, toast]);
 
+  const updateSettings = useCallback((next: UiSettings) => {
+    setSettings(next);
+    setHealth(null);
+  }, []);
+
   const saveConfig = useCallback(async () => {
     if (!validateRepoRoot()) return;
 
@@ -270,11 +290,16 @@ export default function App() {
       await writeConfig(settings);
       appendLog("system", "配置已保存");
       toast.show("配置已保存", "success");
+      await runDoctorCmd(
+        settings.repoRoot,
+        settings.pythonCommand,
+        settings.configPath,
+      );
     } catch (err) {
       appendLog("stderr", `保存配置失败: ${err}`);
       toast.show(`保存配置失败: ${err}`, "error");
     }
-  }, [settings, appendLog, toast, validateRepoRoot]);
+  }, [settings, appendLog, toast, validateRepoRoot, runDoctorCmd]);
 
   const refreshStatus = useCallback(async () => {
     if (!validateRepoRoot()) return;
@@ -290,30 +315,63 @@ export default function App() {
         jsonOutput: true,
       });
       setLastCommand(result.commandLine);
+      if (result.logFilePath) {
+        setLogFilePath(result.logFilePath);
+      }
 
       if (result.code !== 0) {
-        try {
-          const payload = JSON.parse(result.stdout);
-          if (payload.error) {
-            setStatus(null);
-            appendLog("system", "尚未分章节，请先点击分章节。");
-            toast.show("请先分章节", "info");
+        setStatus(null);
+
+        const payload = parseStatusErrorJson(result.stdout);
+
+        if (payload) {
+          appendLog("stderr", `状态读取失败: ${payload.error}`);
+
+          if (payload.config_path) {
+            appendLog("stderr", `status config: ${payload.config_path}`);
           }
-        } catch {
-          setStatus(null);
-          appendLog("stderr", result.stderr || "状态获取失败");
+
+          if (payload.cwd) {
+            appendLog("stderr", `status cwd: ${payload.cwd}`);
+          }
+
+          if (payload.manifest_file) {
+            appendLog("stderr", `status manifest: ${payload.manifest_file}`);
+          }
+
+          if (payload.manifest_file_absolute) {
+            appendLog(
+              "stderr",
+              `status manifest absolute: ${payload.manifest_file_absolute}`,
+            );
+          }
+
+          toast.show("状态读取失败：manifest 不存在或路径不一致", "error");
+        } else {
+          if (result.stderr?.trim()) {
+            appendLog("stderr", result.stderr);
+          } else {
+            appendLog("stderr", "状态获取失败：status 命令未返回可解析错误。");
+          }
           toast.show("状态获取失败", "error");
         }
+
         setTaskState("idle");
         return;
       }
 
       const payload = parseStatusJson(result.stdout);
       setStatus(payload);
+
       appendLog(
         "system",
-        `状态已刷新: ${payload.done}/${payload.total} 已完成`,
+        `状态已刷新: ${payload.done}/${payload.total} 已完成，待翻译 ${payload.pending}，失败 ${payload.failed}`,
       );
+
+      if (payload.total > 0) {
+        appendLog("system", `章节列表已加载: ${payload.chapters.length} 条`);
+      }
+
       toast.show(`状态已刷新: ${payload.done}/${payload.total}`, "success");
     } catch (err) {
       appendLog("stderr", `刷新状态失败: ${err}`);
@@ -346,6 +404,9 @@ export default function App() {
         jsonOutput: true,
       });
       setLastCommand(result.commandLine);
+      if (result.logFilePath) {
+        setLogFilePath(result.logFilePath);
+      }
 
       if (result.code !== 0) {
         appendLog("stderr", result.stderr || "分章节失败");
@@ -359,6 +420,20 @@ export default function App() {
         "system",
         `分章节完成: ${payload.chapters} 章 -> ${payload.en_chapters_dir}`,
       );
+
+      if (payload.cwd) {
+        appendLog("system", `split cwd: ${payload.cwd}`);
+      }
+
+      appendLog(
+        "system",
+        `split manifest: ${payload.manifest_file_absolute ?? payload.manifest_file}`,
+      );
+
+      if (payload.en_chapters_dir_absolute) {
+        appendLog("system", `split en dir: ${payload.en_chapters_dir_absolute}`);
+      }
+
       toast.show(`分章节完成: ${payload.chapters} 章`, "success");
 
       await refreshStatus();
@@ -394,6 +469,9 @@ export default function App() {
         jsonOutput: false,
       });
       setLastCommand(result.commandLine);
+      if (result.logFilePath) {
+        setLogFilePath(result.logFilePath);
+      }
 
       // Extract model from stdout if not already captured
       if (!currentModel) {
@@ -445,6 +523,9 @@ export default function App() {
         maxChapters: 1,
       });
       setLastCommand(result.commandLine);
+      if (result.logFilePath) {
+        setLogFilePath(result.logFilePath);
+      }
 
       await refreshStatus();
 
@@ -520,7 +601,7 @@ export default function App() {
             <CardContent className="p-3">
               <PathSettingsPanel
                 settings={settings}
-                onChange={setSettings}
+                onChange={updateSettings}
               />
             </CardContent>
           </Card>
@@ -532,8 +613,8 @@ export default function App() {
             <CardContent className="p-3">
               <ActionPanel
                 taskState={taskState}
-                canSplit={health?.canSplit ?? true}
-                canTranslate={health?.canTranslate ?? true}
+                canSplit={health?.canSplit === true}
+                canTranslate={health?.canTranslate === true}
                 onSaveConfig={saveConfig}
                 onSplit={runSplit}
                 onRefresh={refreshStatus}
@@ -570,7 +651,7 @@ export default function App() {
 
           <Card className="h-[200px] shrink-0">
             <CardContent className="p-3 h-full">
-              <LogConsole logs={logs} onClear={clearLogs} logFilePath={null} />
+              <LogConsole logs={logs} onClear={clearLogs} logFilePath={logFilePath} />
             </CardContent>
           </Card>
         </motion.main>

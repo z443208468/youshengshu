@@ -38,6 +38,7 @@ struct ProcessOutput {
     command_line: String,
     started_at: String,
     finished_at: String,
+    log_file_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -243,7 +244,21 @@ fn default_python_command(repo_root: &std::path::Path) -> String {
 // Log file writer
 // ---------------------------------------------------------------------------
 
-fn open_log_file(repo_root: &std::path::Path) -> Result<std::fs::File, String> {
+fn resolve_repo_relative_path(repo_root: &str, raw_path: &str) -> std::path::PathBuf {
+    let path = std::path::PathBuf::from(raw_path);
+    if path.is_absolute() {
+        path
+    } else {
+        std::path::PathBuf::from(repo_root).join(path)
+    }
+}
+
+struct OpenedLogFile {
+    file: std::fs::File,
+    path: std::path::PathBuf,
+}
+
+fn open_log_file(repo_root: &std::path::Path) -> Result<OpenedLogFile, String> {
     let log_dir = repo_root.join("logs");
     std::fs::create_dir_all(&log_dir)
         .map_err(|e| format!("创建日志目录失败: {e}"))?;
@@ -251,7 +266,7 @@ fn open_log_file(repo_root: &std::path::Path) -> Result<std::fs::File, String> {
     let path = log_dir.join(&filename);
     let file = std::fs::File::create(&path)
         .map_err(|e| format!("创建日志文件失败: {e}"))?;
-    Ok(file)
+    Ok(OpenedLogFile { file, path })
 }
 
 fn write_log_line(file: &mut std::fs::File, stream: &str, line: &str) {
@@ -301,15 +316,9 @@ fn get_repo_root() -> String {
 /// Resolve a potentially relative path against repo_root, returning an absolute path.
 #[tauri::command]
 fn resolve_path(repo_root: String, raw_path: String) -> Result<String, String> {
-    let root = std::path::PathBuf::from(&repo_root);
-    let path = std::path::PathBuf::from(&raw_path);
-
-    if path.is_absolute() {
-        Ok(path.to_string_lossy().to_string())
-    } else {
-        let resolved = root.join(&path);
-        Ok(resolved.to_string_lossy().to_string())
-    }
+    Ok(resolve_repo_relative_path(&repo_root, &raw_path)
+        .to_string_lossy()
+        .to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -317,12 +326,17 @@ fn resolve_path(repo_root: String, raw_path: String) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-fn read_youshengshu_config(config_path: String) -> Result<serde_json::Value, String> {
-    let path = std::path::Path::new(&config_path);
+fn read_youshengshu_config(
+    repo_root: String,
+    config_path: String,
+) -> Result<serde_json::Value, String> {
+    let path_buf = resolve_repo_relative_path(&repo_root, &config_path);
+    let path = path_buf.as_path();
     if path.exists() {
-        let contents =
-            std::fs::read_to_string(path).map_err(|e| format!("读取配置失败: {e}"))?;
-        serde_json::from_str(&contents).map_err(|e| format!("配置格式错误: {e}"))
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| format!("读取配置失败: {} ({e})", path.display()))?;
+        serde_json::from_str(&contents)
+            .map_err(|e| format!("配置格式错误: {} ({e})", path.display()))
     } else {
         Ok(serde_json::json!({
             "paths": {
@@ -386,11 +400,12 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
         return Err("配置文件路径为空，请设置 config/default_config.json 或选择配置文件路径".to_string());
     }
 
-    let config_path = std::path::Path::new(&paths.config_path);
+    let config_path_buf = resolve_repo_relative_path(&paths.repo_root, &paths.config_path);
+    let config_path = config_path_buf.as_path();
 
     let mut config: serde_json::Value = if config_path.exists() {
-        let contents =
-            std::fs::read_to_string(config_path).map_err(|e| format!("读取配置失败: {e}"))?;
+        let contents = std::fs::read_to_string(config_path)
+            .map_err(|e| format!("读取配置失败: {} ({e})", config_path.display()))?;
         serde_json::from_str(&contents).unwrap_or_default()
     } else {
         serde_json::Value::Null
@@ -576,8 +591,9 @@ async fn run_python_cli(
 
     // Open log file
     let repo_root_path = std::path::PathBuf::from(&repo_root);
-    let log_file = open_log_file(&repo_root_path)?;
-    let log_file = std::sync::Arc::new(std::sync::Mutex::new(log_file));
+    let opened_log = open_log_file(&repo_root_path)?;
+    let log_file_path = opened_log.path.to_string_lossy().to_string();
+    let log_file = std::sync::Arc::new(std::sync::Mutex::new(opened_log.file));
     write_log_line(&mut *log_file.lock().unwrap(), "system", &format!("Working directory: {}", repo_root));
     write_log_line(&mut *log_file.lock().unwrap(), "system", &format!("Command: {}", spec.display));
 
@@ -750,6 +766,7 @@ async fn run_python_cli(
         command_line: spec.display,
         started_at,
         finished_at,
+        log_file_path,
     })
 }
 

@@ -14,7 +14,7 @@ export function StatusCards({ status, currentModel }: StatusCardsProps) {
       <Card>
         <CardContent className="p-4">
           <p className="text-sm text-muted-foreground">
-            尚未加载状态。请先分章节或点击刷新状态。
+            尚未加载状态。请先点击分章节，或点击刷新状态；若已分章节仍为空，请查看日志中的 manifest 路径。
           </p>
         </CardContent>
       </Card>

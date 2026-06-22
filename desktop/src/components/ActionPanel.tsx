@@ -62,7 +62,7 @@ export function ActionPanel({
         size="sm"
         className="w-full justify-start text-xs"
         disabled={isRunning || !canSplit}
-        title={!canSplit ? "环境不满足分章节条件" : undefined}
+        title={!canSplit ? "输入 TXT 或基础环境未就绪，请保存配置后重新检查" : undefined}
         onClick={onSplit}
       >
         {taskState === "splitting" ? (
@@ -93,7 +93,7 @@ export function ActionPanel({
         size="sm"
         className="w-full justify-start text-xs"
         disabled={isRunning || !canTranslate}
-        title={!canTranslate ? "翻译环境未就绪（检查 LM Studio）" : undefined}
+        title={!canTranslate ? "翻译条件未就绪：需要输入 TXT 正常且 LM Studio 已加载模型" : undefined}
         onClick={onTranslate}
       >
         {taskState === "translating" ? (
@@ -109,7 +109,7 @@ export function ActionPanel({
         size="sm"
         className="w-full justify-start text-xs"
         disabled={isRunning || !canTranslate}
-        title={!canTranslate ? "翻译环境未就绪（检查 LM Studio）" : undefined}
+        title={!canTranslate ? "翻译条件未就绪：需要输入 TXT 正常且 LM Studio 已加载模型" : undefined}
         onClick={onTranslateNext}
       >
         <StepForward className="mr-2 h-3.5 w-3.5" />

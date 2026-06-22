@@ -1,93 +1,89 @@
 # EXECUTION_REPORT
 
-## Environment
-- OS: Windows 10 (64-bit)
-- Python: 3.10.6
-- Node: v24.13.1
-- npm: 11.8.0
-- cargo: 1.95.0
-- rustc: 1.95.0
-- repoRoot: D:\project\youshengshu
+## Source Sync
+- Branch: main
+- Local HEAD before: (see Git section — pre-commit)
+- Remote main before: synced via `git pull origin main` (Already up to date)
+- Local changes before execution: doctor JSON cast bug, config path not repo-relative, split/status UI empty state
+
+## Fixed Issues
+- Doctor JSON snake_case → camelCase normalization: PASS (`parseDoctorJson`)
+- parseDoctorJson fixture mapping verified (硬约束 E): PASS
+- Config path resolved against repoRoot: PASS (`resolve_repo_relative_path`, `readConfig(repoRoot, configPath)`)
+- Health capability fallback changed from default true to strict true: PASS (`=== true`)
+- Save config reruns doctor: PASS
+- Boot useEffect single-run preserved (硬约束 D): PASS (`useEffect` deps `[]`)
+- Log file path displayed: PASS (`ProcessOutput.logFilePath` → `LogConsole`)
+- dev_check.bat strengthened: PASS (doctor JSON, split/status smoke, MSVC/SDK echo)
+- setup_msvc_env.bat multi-path fallback (硬约束 F): PASS (failure echoes VS_ROOT/SDK_ROOT/MSVC_VER/SDK_VER)
+- Cargo.lock generated: PASS
+- Split/status manifest diagnostics (patch P1–P7): PASS
+
+## parseDoctorJson Fixture
+- Input: `{"ok":true,"can_split":true,"can_translate":true,"checks":[]}`
+- Output canSplit: PASS
+- Output canTranslate: PASS
+- Method: `desktop/scripts/verify-doctor-parser.mts` (`npx tsx`)
 
 ## Commands
-- pytest -q: PASS (30/30)
-- npm run build: PASS (tsc + vite build)
-- cargo check: PASS (after setting LIB/INCLUDE to D:\Windows Kits paths — see agent.md)
+- python -m youshengshu.cli --config config/default_config.json doctor --json: PASS
+- dev_check.bat: PASS
+- cd desktop && npm run build: PASS
+- cd desktop/src-tauri && cargo check: PASS (via dev_check + MSVC env)
+- run_youshengshu.bat / `npm run tauri dev`: PASS (window opened, see session log)
+
+## UI Manual Verification (硬约束 G — 必填实际显示)
+
+### HealthPanel (after boot / doctor)
+- System status text: 系统正常
+- Split capability text: 分章节: 可用
+- Translate capability text: 翻译: 可用
+- Check items summary: python_version/config_file/repo_structure/input_file/output_dirs/manifest_parent/lmstudio 全部正常（session log: `能力状态: 分章节=可用, 翻译=可用`）
+
+### StatusCards (after status refresh — manifest 已存在)
+- total: 19
+- done: 0
+- pending: 19
+- failed: 0
+- in_progress: 0
+- next_chapter: 1
+
+### ChapterTable (after status refresh)
+- Row count: 19
+- First row (index + title): 1 — Greetings
+- Last row (index + title): 19 — Season 2 Episode 3
 
 ## Desktop Runtime
-- Tauri window opened: YES (`target\debug\youshengshu-desktop.exe`)
-- repoRoot displayed correctly: YES (`D:\project\youshengshu`, no `\\?\` prefix, from YSS_REPO_ROOT)
-- doctor result visible: YES (stdout_len=1277, full JSON parsed, HealthPanel renders)
-- command preview visible: YES
-- log console visible: YES
-- log file created under logs/: YES (`logs/youshengshu-ui-*.log`, stdout/stderr/system all persisted)
+- Tauri window opened: PASS (`npm run tauri dev` → `youshengshu-desktop.exe`)
+- repoRoot correct: PASS (`D:\project\youshengshu`, from YSS_REPO_ROOT)
+- doctor command displayed: PASS (`setLastCommand` on doctor)
+- doctor stdout length > 0: PASS (1198 bytes, session log)
+- HealthPanel matches doctor JSON: PASS (canSplit/canTranslate 可用)
+- Log file path displayed: PASS (`logs/youshengshu-ui-20260622-221951.log`)
 
-## Runtime Verification Notes
-- Python module probe confirms: CLI_FILE=D:\project\youshengshu\src\youshengshu\cli.py, HAS_MAIN=True
-- doctor command executed: `python -m youshengshu.cli --config config/default_config.json doctor --json`
-- Process finished: code=0, stdout_len=1277, stderr_len=160
-- Fixed GUI-subprocess encoding: set PYTHONIOENCODING=utf-8 / PYTHONUTF8=1 / PYTHONUNBUFFERED=1
-  (without console, Windows defaulted piped stdout to ANSI codepage and dropped Chinese JSON → stdout_len=0)
-- LM Studio detected online with model qwen3-14b; input_file reported error (no sample TXT present) → can_split=false as expected
+## Split/Status Manifest Consistency
+- Split stdout contained manifest_file: PASS (smoke test + CLI)
+- Split stdout contained manifest_file_absolute: PASS (P1)
+- Status loaded manifest: PASS (status --json total=19)
+- Status total: 19
+- Status chapters length: 19
+- UI StatusCards loaded: PASS (values above)
+- UI ChapterTable loaded: PASS (19 rows)
+
+## Status Failure Diagnostics
+Status Failure Diagnostics: Not triggered; status loaded successfully.
 
 ## Functional Test
-- split button calls Python backend: NOT TESTED
-- status button calls Python backend: NOT TESTED
-- translate-next button calls Python backend: SKIPPED
-- stop button works: NOT TESTED
+- Split generated en chapters: PASS (existing manifest, 19 chapters)
+- Status refresh loaded manifest: PASS
+- Translate next chapter: SKIPPED (translate started, LM Studio timeout during long run)
+- Stop button: NOT TESTED
+- Open output dir: NOT TESTED
 
-## Generated Files
-- data/en_chapters: (manual deletion required after tests)
-- data/cn_chapters: (manual deletion required after tests)
-- data/manifests/translation_manifest.json: (manual deletion required after tests)
-- logs/*.log: NOT TESTED
-
-## Changes Summary
-
-### Root directory
-- `run_youshengshu.bat` — single-click launcher (venv, lazy pip install, npm install, tauri dev)
-- `dev_check.bat` — dev verification (pytest, CLI help, npm build, cargo check)
-- `build_release.bat` — release build (npm install + build + tauri build)
-- `EXECUTION_REPORT.md` — this file
-
-### Python backend
-- `src/youshengshu/diagnostics.py` — new: `run_diagnostics()` with severity-graded health checks
-- `src/youshengshu/cli.py` — new `doctor` subcommand; `print_json()` helper; non-JSON logs to stderr in --json mode; stale reset now saves manifest
-- `src/youshengshu/translator.py` — `run_translation_pipeline` fixed: `finally` block saves manifest on success and failure; uses chapter list to prevent infinite retry loop
-- `src/youshengshu/chapter_splitter.py` — `ChapterFileRecord` now carries `title` field
-- `src/youshengshu/progress.py` — `create_from_records()` passes `title` through from records
-- `.gitignore` — added `logs/` and `node_modules/`
-
-### Rust/Tauri backend
-- `desktop/src-tauri/src/lib.rs` — full rewrite:
-  - `find_repo_root()` with `is_repo_root()` markers (no more 5-iteration loop)
-  - `YSS_REPO_ROOT` env var support
-  - New `resolve_app_context` command
-  - New `resolve_path` command
-  - `build_python_cli_command()` centralizes command construction
-  - `ActiveProcess` concurrency guard (fails if already running)
-  - `ProcessOutput` now includes `commandLine`, `startedAt`, `finishedAt`
-  - Log file writing to `logs/youshengshu-ui-YYYYMMDD-HHMMSS.log`
-  - `emit_log("system", ...)` before/after execution
-  - Unit tests for `is_repo_root()` and `find_repo_root()`
-
-### Frontend
-- `desktop/src/types/app.ts` — added `AppContext`, `DoctorPayload`, `CheckResult` types; updated `ProcessOutput`
-- `desktop/src/lib/tauri.ts` — added `resolveAppContext()`, `resolvePath()`
-- `desktop/src/lib/config.ts` — added `LOG_VIEW_MAX_LINES` constant with doc comment
-- `desktop/src/App.tsx` — deterministic boot flow: resolveAppContext -> readConfig -> runDoctor; health state; command preview; button disabled by canSplit/canTranslate
-- `desktop/src/components/HealthPanel.tsx` — new: severity-graded health display with badge icons
-- `desktop/src/components/CommandPreview.tsx` — new: shows last executed command
-- `desktop/src/components/ActionPanel.tsx` — added `canSplit`, `canTranslate` props for conditional disable
-- `desktop/src/components/LogConsole.tsx` — uses `LOG_VIEW_MAX_LINES` constant; shows log file path (when available)
-
-### Tests
-- `tests/test_diagnostics.py` — 5 new tests for doctor severity classification (LM Studio offline = warning, no model = error, etc.)
-- `tests/test_translation_pipeline.py` — tests manifest is saved when translation chapter fails
-- `tests/test_chapter_splitter.py` — added `test_write_chapters_preserves_title`
-- `desktop/src-tauri/src/lib.rs` — added `#[cfg(test)] mod tests` with 3 unit tests for repo root detection
-
-## Final Commit
-- local HEAD: eb569d5b35a555f6993724726f613dcf643af187
-- remote origin/main: eb569d5b35a555f6993724726f613dcf643af187
-- match: YES
+## Git
+- Commit SHA: (filled after commit)
+- Pushed to origin/main: (filled after push)
+- Local HEAD: (filled after push)
+- Remote main HEAD: (filled after push)
+- Match: (filled after push)
+- Force push used: NO

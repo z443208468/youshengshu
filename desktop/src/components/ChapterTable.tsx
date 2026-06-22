@@ -27,7 +27,7 @@ export function ChapterTable({ chapters }: ChapterTableProps) {
   if (chapters.length === 0) {
     return (
       <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-        尚未生成章节。请选择原始 TXT 后点击"分章节"。
+        尚未加载章节列表。若已分章节仍为空，请查看日志中的 split/status manifest 路径是否一致。
       </div>
     );
   }

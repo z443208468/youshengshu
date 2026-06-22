@@ -35,6 +35,15 @@ export interface CheckResult {
   detail: Record<string, unknown>;
 }
 
+export interface DoctorPayloadRaw {
+  ok?: unknown;
+  can_split?: unknown;
+  can_translate?: unknown;
+  canSplit?: unknown;
+  canTranslate?: unknown;
+  checks?: unknown;
+}
+
 export interface DoctorPayload {
   ok: boolean;
   canSplit: boolean;
@@ -83,4 +92,5 @@ export interface ProcessOutput {
   commandLine: string;
   startedAt: string;
   finishedAt: string;
+  logFilePath: string;
 }
