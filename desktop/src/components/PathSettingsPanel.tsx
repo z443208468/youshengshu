@@ -10,8 +10,16 @@ interface PathSettingsPanelProps {
   onChange: (settings: UiSettings) => void;
 }
 
+type PathSettingsKey =
+  | "repoRoot"
+  | "inputFile"
+  | "enChaptersDir"
+  | "cnChaptersDir"
+  | "manifestFile"
+  | "configPath";
+
 interface PathField {
-  key: keyof UiSettings;
+  key: PathSettingsKey;
   label: string;
   kind: "file" | "dir" | "save";
   filter?: { name: string; extensions: string[] };
@@ -138,6 +146,118 @@ export function PathSettingsPanel({
           className="h-8 text-xs"
           placeholder="http://localhost:1234/v1"
         />
+      </div>
+
+      <Separator className="my-3" />
+
+      <div className="space-y-2">
+        <Label className="text-xs text-muted-foreground">翻译参数</Label>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">
+            模型上下文 token 上限（手动填写，需与 LM Studio Context Length 一致）
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            value={settings.chunkingContextTokens}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                chunkingContextTokens: Number(e.target.value),
+              })
+            }
+            className="h-8 text-xs"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">
+            输出 token 上限 / reserved output tokens
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            value={settings.chunkingReservedOutputTokens}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              onChange({
+                ...settings,
+                chunkingReservedOutputTokens: value,
+                lmStudioMaxOutputTokens: value,
+              });
+            }}
+            className="h-8 text-xs"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">请求超时秒数</Label>
+          <Input
+            type="number"
+            min={1}
+            value={settings.lmStudioRequestTimeoutSeconds}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                lmStudioRequestTimeoutSeconds: Number(e.target.value),
+              })
+            }
+            className="h-8 text-xs"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">
+            请求尝试次数（总次数，建议 1；不是额外重试次数）
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            value={settings.lmStudioMaxRetries}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                lmStudioMaxRetries: Number(e.target.value),
+              })
+            }
+            className="h-8 text-xs"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">
+            安全比例 safety ratio，建议 0.5–0.75
+          </Label>
+          <Input
+            type="number"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={settings.chunkingSafetyRatio}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                chunkingSafetyRatio: Number(e.target.value),
+              })
+            }
+            className="h-8 text-xs"
+          />
+        </div>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={settings.chunkingAllowWordSplit}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                chunkingAllowWordSplit: e.target.checked,
+              })
+            }
+          />
+          允许极端情况下切分超长单词/URL（默认关闭，不建议开启）
+        </label>
       </div>
     </div>
   );

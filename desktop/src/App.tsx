@@ -52,12 +52,37 @@ export default function App() {
   const toast = useToast();
 
   // ---- Merge config into settings (plain function, no hook deps) ----
+  function readNumberConfig(
+    obj: Record<string, unknown>,
+    key: string,
+    fallback: number,
+  ): number {
+    const value = obj[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
+  }
+
+  function readBooleanConfig(
+    obj: Record<string, unknown>,
+    key: string,
+    fallback: boolean,
+  ): boolean {
+    const value = obj[key];
+    if (typeof value === "boolean") return value;
+    return fallback;
+  }
+
   function mergeConfigIntoSettings(
     context: AppContext,
     config: Record<string, unknown>,
   ): UiSettings {
     const paths = (config.paths as Record<string, string>) || {};
-    const lmstudio = (config.lmstudio as Record<string, string>) || {};
+    const lmstudio = (config.lmstudio as Record<string, unknown>) || {};
+    const chunking = (config.chunking as Record<string, unknown>) || {};
     return {
       repoRoot: context.repoRoot,
       configPath: context.configPath,
@@ -67,7 +92,44 @@ export default function App() {
       cnChaptersDir: paths.cn_chapters_dir || DEFAULT_SETTINGS.cnChaptersDir,
       manifestFile: paths.manifest_file || DEFAULT_SETTINGS.manifestFile,
       lmStudioBaseUrl:
-        lmstudio.base_url || DEFAULT_SETTINGS.lmStudioBaseUrl,
+        typeof lmstudio.base_url === "string"
+          ? lmstudio.base_url
+          : DEFAULT_SETTINGS.lmStudioBaseUrl,
+      lmStudioMaxOutputTokens: readNumberConfig(
+        lmstudio,
+        "max_output_tokens",
+        DEFAULT_SETTINGS.lmStudioMaxOutputTokens,
+      ),
+      lmStudioRequestTimeoutSeconds: readNumberConfig(
+        lmstudio,
+        "request_timeout_seconds",
+        DEFAULT_SETTINGS.lmStudioRequestTimeoutSeconds,
+      ),
+      lmStudioMaxRetries: readNumberConfig(
+        lmstudio,
+        "max_retries",
+        DEFAULT_SETTINGS.lmStudioMaxRetries,
+      ),
+      chunkingContextTokens: readNumberConfig(
+        chunking,
+        "context_tokens",
+        DEFAULT_SETTINGS.chunkingContextTokens,
+      ),
+      chunkingReservedOutputTokens: readNumberConfig(
+        chunking,
+        "reserved_output_tokens",
+        DEFAULT_SETTINGS.chunkingReservedOutputTokens,
+      ),
+      chunkingSafetyRatio: readNumberConfig(
+        chunking,
+        "safety_ratio",
+        DEFAULT_SETTINGS.chunkingSafetyRatio,
+      ),
+      chunkingAllowWordSplit: readBooleanConfig(
+        chunking,
+        "allow_word_split",
+        DEFAULT_SETTINGS.chunkingAllowWordSplit,
+      ),
     };
   }
 

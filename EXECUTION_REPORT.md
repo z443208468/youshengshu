@@ -87,3 +87,35 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - Remote main HEAD: (verified after push)
 - Match: YES
 - Force push used: NO
+
+## Translation Chunking Fix
+
+- text_utils paragraph/sentence/word chunking implemented: PASS
+- default word split disabled: PASS
+- oversized single word raises ConfigError: PASS (pytest)
+- allow_word_split=true explicit escape hatch: PASS (pytest)
+- chunk debug info implemented: PASS
+- translator chunk plan logging implemented: PASS
+- max_tokens explicitly passed from config: PASS
+
+## LM Studio Config Handling
+
+- Rust writeConfig preserves existing lmstudio unknown fields: PASS (ensure_json_object merge)
+- Rust writeConfig preserves existing chunking unknown fields: PASS
+- UI exposes context tokens: PASS
+- UI exposes reserved output / max output tokens: PASS
+- UI exposes timeout seconds: PASS
+- UI exposes request attempt count (max_retries): PASS
+- UI exposes safety ratio: PASS
+- UI exposes allow word split: PASS
+
+## Translation Tests
+
+- pytest text_utils boundary tests: PASS (40 passed)
+- cargo check: PASS
+- cargo test: PASS (4 passed)
+- translate --max-chapters 1: PASS (chunk plan + per-chunk info in stdout)
+- Chunk plan appeared in logs: PASS
+- UI translation parameters saved to config: NOT MANUALLY TESTED (UI build PASS)
+- User config not overwritten by save: NOT MANUALLY TESTED
+- git grep no default char_limit word split: PASS (no matches in src/)

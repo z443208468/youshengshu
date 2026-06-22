@@ -24,7 +24,7 @@ class FailingClient:
     def resolve_model_id(self) -> str:
         return self._resolved_model_id
 
-    def translate(self, messages):
+    def translate(self, messages, temperature=None, top_p=None, max_tokens=None):
         raise RuntimeError("fake failure")
 
 

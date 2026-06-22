@@ -1,7 +1,6 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from .exceptions import ConfigError
 
@@ -27,20 +26,30 @@ class LMStudioConfig:
     model_id: str = "auto"
     temperature: float = 0.2
     top_p: float = 0.85
-    max_output_tokens: int = 4096
-    request_timeout_seconds: int = 600
-    max_retries: int = 3
+    # Manual output cap sent to LM Studio as max_tokens.
+    max_output_tokens: int = 2048
+    # Local inference can be slow. Timeout is configurable.
+    request_timeout_seconds: int = 900
+    # Total request attempts (not "extra retries after failure"). See hard constraint H.
+    max_retries: int = 1
     retry_sleep_seconds: int = 5
 
 
 @dataclass
 class ChunkingConfig:
+    # Manual context window. User must match LM Studio Local Server context length.
     context_tokens: int = 8192
+    # Currently informational/config sanity only.
+    # Runtime budget uses estimated prompt_tokens from the actual prompt text,
+    # not this reserved_prompt_tokens field.
     reserved_prompt_tokens: int = 1800
-    reserved_output_tokens: int = 4096
-    safety_ratio: float = 0.72
+    # Reserved response budget. Should normally match lmstudio.max_output_tokens.
+    reserved_output_tokens: int = 2048
+    safety_ratio: float = 0.65
     english_chars_per_token: float = 4.0
     cjk_chars_per_token: float = 1.2
+    split_mode: str = "paragraph_sentence_word"
+    allow_word_split: bool = False
 
 
 @dataclass

@@ -62,7 +62,7 @@ mkdir "%SMOKE_DIR%"
 
 python -c "from pathlib import Path; p=Path(r'%SMOKE_INPUT%'); text='Chapter 1: Chapter 1: Test\n' + ('A paragraph for smoke test. '*260) + '\n\nChapter 2: Chapter 2: Test\n' + ('Another paragraph for smoke test. '*260); p.write_text(text, encoding='utf-8')"
 
-python -c "import json; from pathlib import Path; cfg={'paths':{'input_file':r'%SMOKE_INPUT%','en_chapters_dir':r'%SMOKE_EN%','cn_chapters_dir':r'%SMOKE_CN%','manifest_file':r'%SMOKE_MANIFEST%'},'chapter_split':{'strict_chapter_sequence':True,'min_valid_chapter_chars':100},'lmstudio':{'base_url':'http://localhost:1234/v1','api_key':'lm-studio','model_id':'auto','temperature':0.2,'top_p':0.85,'max_output_tokens':4096,'request_timeout_seconds':2,'max_retries':0,'retry_sleep_seconds':1},'chunking':{'context_tokens':8192,'reserved_prompt_tokens':1800,'reserved_output_tokens':4096,'safety_ratio':0.72,'english_chars_per_token':4.0,'cjk_chars_per_token':1.2},'translation':{'skip_existing_done_chapters':True,'write_partial_file':True,'strip_model_preamble':True}}; Path(r'%SMOKE_CONFIG%').write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')"
+python -c "import json; from pathlib import Path; cfg={'paths':{'input_file':r'%SMOKE_INPUT%','en_chapters_dir':r'%SMOKE_EN%','cn_chapters_dir':r'%SMOKE_CN%','manifest_file':r'%SMOKE_MANIFEST%'},'chapter_split':{'strict_chapter_sequence':True,'min_valid_chapter_chars':100},'lmstudio':{'base_url':'http://localhost:1234/v1','api_key':'lm-studio','model_id':'auto','temperature':0.2,'top_p':0.85,'max_output_tokens':2048,'request_timeout_seconds':2,'max_retries':1,'retry_sleep_seconds':1},'chunking':{'context_tokens':8192,'reserved_prompt_tokens':1800,'reserved_output_tokens':2048,'safety_ratio':0.65,'english_chars_per_token':4.0,'cjk_chars_per_token':1.2,'split_mode':'paragraph_sentence_word','allow_word_split':False},'translation':{'skip_existing_done_chapters':True,'write_partial_file':True,'strip_model_preamble':True}}; Path(r'%SMOKE_CONFIG%').write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')"
 
 python -m youshengshu.cli --config "%SMOKE_CONFIG%" split --json > "%SMOKE_DIR%\split.json"
 if errorlevel 1 goto smoke_fail
@@ -104,6 +104,10 @@ if errorlevel 1 exit /b 1
 echo [CHECK] MSVC=%MSVC_VER% SDK=%SDK_VER%
 cd /d "%REPO_ROOT%desktop\src-tauri"
 cargo check
+if errorlevel 1 exit /b 1
+
+echo [CHECK] Rust cargo test
+cargo test
 if errorlevel 1 exit /b 1
 
 echo [CHECK] OK

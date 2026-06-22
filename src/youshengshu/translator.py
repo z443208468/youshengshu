@@ -13,7 +13,11 @@ from .progress import (
     TRANSLATION_STATUS_DONE,
     TRANSLATION_STATUS_FAILED,
 )
-from .text_utils import split_text_for_translation
+from .text_utils import (
+    split_text_for_translation,
+    calculate_chunk_budget,
+    describe_chunks,
+)
 from .validation import strip_known_preambles, validate_translation_chunk
 
 SYSTEM_PROMPT = "你是严格的英译中小说翻译引擎。你只输出中文译文，不输出解释、分析、总结或额外说明。"
@@ -117,10 +121,28 @@ def translate_chapter(
     prompt_suffix = USER_PROMPT_TEMPLATE.split("{source_chunk}")[1]
     prompt_text_without_source = SYSTEM_PROMPT + "\n\n" + prompt_prefix + prompt_suffix
 
+    budget = calculate_chunk_budget(
+        config.chunking,
+        prompt_text_without_source,
+    )
+
     chunks = split_text_for_translation(
         chapter_text,
         config.chunking,
         prompt_text_without_source,
+    )
+
+    chunk_infos = describe_chunks(chunks, config.chunking)
+
+    print(
+        f"  Chunk plan: chapter_index={chapter_record.index}, "
+        f"chunks={len(chunks)}, "
+        f"context_tokens={budget.context_tokens}, "
+        f"prompt_tokens≈{budget.prompt_tokens}, "
+        f"reserved_output_tokens={budget.reserved_output_tokens}, "
+        f"safety_ratio={budget.safety_ratio}, "
+        f"available_source_tokens={budget.available_source_tokens}",
+        flush=True,
     )
 
     translated_chunks: list[str] = []
@@ -129,7 +151,14 @@ def translate_chapter(
     cn_final_path = Path(chapter_record.cn_path)
 
     for i, chunk in enumerate(chunks):
-        print(f"  Chunk {i + 1}/{len(chunks)}...")
+        info = chunk_infos[i]
+        print(
+            f"  Chunk {i + 1}/{len(chunks)} "
+            f"(estimated_tokens≈{info.estimated_tokens}, "
+            f"chars={info.chars}, "
+            f"paragraphs={info.paragraphs})...",
+            flush=True,
+        )
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -140,7 +169,10 @@ def translate_chapter(
         ]
 
         try:
-            result = client.translate(messages)
+            result = client.translate(
+                messages,
+                max_tokens=config.lmstudio.max_output_tokens,
+            )
         except Exception as e:
             manifest.set_chapter_status(
                 chapter_record.index,

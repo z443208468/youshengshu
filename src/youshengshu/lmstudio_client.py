@@ -66,6 +66,19 @@ class LMStudioClient:
         max_retries = self.config.max_retries
         retry_sleep = self.config.retry_sleep_seconds
 
+        if max_retries < 1:
+            raise LMStudioError(
+                f"max_retries 必须 >= 1（总尝试次数），当前为 {max_retries}。"
+            )
+
+        effective_max_tokens = (
+            max_tokens if max_tokens is not None else self.config.max_output_tokens
+        )
+        if effective_max_tokens <= 0:
+            raise LMStudioError(
+                f"max_tokens 必须大于 0，当前为 {effective_max_tokens}。"
+            )
+
         for attempt in range(max_retries):
             try:
                 response = self._client.chat.completions.create(
@@ -73,7 +86,7 @@ class LMStudioClient:
                     messages=messages,
                     temperature=temperature or self.config.temperature,
                     top_p=top_p or self.config.top_p,
-                    max_tokens=max_tokens or self.config.max_output_tokens,
+                    max_tokens=effective_max_tokens,
                 )
 
                 content = response.choices[0].message.content
