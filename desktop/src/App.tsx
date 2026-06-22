@@ -99,13 +99,32 @@ export default function App() {
           jsonOutput: true,
         });
 
-        if (result.code !== 0) {
-          appendLog("stderr", result.stderr || "诊断命令失败");
+        appendLog("system", `doctor exit code: ${result.code}`);
+        appendLog("system", `doctor stdout length: ${result.stdout?.length ?? 0}`);
+        appendLog("system", `doctor stderr length: ${result.stderr?.length ?? 0}`);
+
+        if (!result.stdout || result.stdout.trim().length === 0) {
+          appendLog("stderr", "doctor 没有返回 JSON stdout。");
+          if (result.stderr?.trim()) {
+            appendLog("stderr", `doctor stderr: ${result.stderr}`);
+          }
           setHealth({ ok: false, canSplit: false, canTranslate: false, checks: [] });
           return;
         }
 
-        const payload = JSON.parse(result.stdout) as DoctorPayload;
+        let payload: DoctorPayload;
+        try {
+          payload = JSON.parse(result.stdout) as DoctorPayload;
+        } catch (err) {
+          appendLog("stderr", `doctor JSON 解析失败: ${String(err)}`);
+          appendLog("stderr", `doctor stdout 原文: ${result.stdout}`);
+          if (result.stderr?.trim()) {
+            appendLog("stderr", `doctor stderr 原文: ${result.stderr}`);
+          }
+          setHealth({ ok: false, canSplit: false, canTranslate: false, checks: [] });
+          return;
+        }
+
         setHealth(payload);
 
         if (payload.ok) {
@@ -172,12 +191,9 @@ export default function App() {
           appendLog("system", "未找到配置文件，使用默认配置。");
         }
 
-        // Step 3: run doctor
-        try {
-          await runDoctorCmd(context.repoRoot, context.pythonCommand, context.configPath);
-        } catch {
-          // doctor failure is non-fatal for the app
-        }
+        // Step 3: run doctor (non-blocking — don't await the boot sequence)
+        runDoctorCmd(context.repoRoot, context.pythonCommand, context.configPath)
+          .catch(() => {});
       } catch (err) {
         appendLog(
           "stderr",

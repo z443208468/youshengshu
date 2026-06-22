@@ -537,9 +537,10 @@ async fn run_python_cli(
 
     // Open log file
     let repo_root_path = std::path::PathBuf::from(&repo_root);
-    let mut log_file = open_log_file(&repo_root_path)?;
-    write_log_line(&mut log_file, "system", &format!("Working directory: {}", repo_root));
-    write_log_line(&mut log_file, "system", &format!("Command: {}", spec.display));
+    let log_file = open_log_file(&repo_root_path)?;
+    let log_file = std::sync::Arc::new(std::sync::Mutex::new(log_file));
+    write_log_line(&mut *log_file.lock().unwrap(), "system", &format!("Working directory: {}", repo_root));
+    write_log_line(&mut *log_file.lock().unwrap(), "system", &format!("Command: {}", spec.display));
 
     // Emit log to frontend
     let _ = app.emit(
@@ -559,8 +560,55 @@ async fn run_python_cli(
 
     // Build and spawn process
     let mut cmd = Command::new(&spec.program);
-    cmd.current_dir(&spec.cwd)
-        .env("PYTHONPATH", &spec.env_pythonpath);
+    cmd.current_dir(&spec.cwd);
+
+    // Force UTF-8 stdio so Chinese JSON output is not corrupted/lost when the
+    // child is launched by the GUI process without a console (Windows defaults
+    // to the ANSI codepage for piped stdout otherwise).
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONUNBUFFERED", "1");
+
+    // Merge PYTHONPATH: prepend repo's src/ so it takes priority over venv site-packages
+    let pythonpath_val = spec.env_pythonpath.to_string_lossy().to_string();
+    if let Ok(old) = std::env::var("PYTHONPATH") {
+        if !old.trim().is_empty() {
+            cmd.env("PYTHONPATH", format!("{};{}", pythonpath_val, old));
+        } else {
+            cmd.env("PYTHONPATH", &pythonpath_val);
+        }
+    } else {
+        cmd.env("PYTHONPATH", &pythonpath_val);
+    }
+
+    // Python module probe: log where youshengshu.cli actually loads from
+    let probe_result = std::process::Command::new(&spec.program)
+        .current_dir(&spec.cwd)
+        .env("PYTHONPATH", &pythonpath_val)
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .arg("-c")
+        .arg("import youshengshu.cli as c; print('CLI_FILE=' + str(c.__file__)); print('HAS_MAIN=' + str(hasattr(c, 'main')))")
+        .output();
+
+    if let Ok(probe) = probe_result {
+        let probe_out = String::from_utf8_lossy(&probe.stdout).to_string();
+        let probe_err = String::from_utf8_lossy(&probe.stderr).to_string();
+        write_log_line(&mut *log_file.lock().unwrap(), "system", &format!("Python probe: {}", probe_out.trim().replace('\n', " | ")));
+        let _ = app.emit(LOG_EVENT_NAME, LogPayload {
+            stream: "system".to_string(),
+            line: format!("Python probe: {}", probe_out.trim()),
+        });
+        if !probe_err.trim().is_empty() {
+            write_log_line(&mut *log_file.lock().unwrap(), "stderr", &probe_err.trim());
+            let _ = app.emit(LOG_EVENT_NAME, LogPayload {
+                stream: "stderr".to_string(),
+                line: format!("Python probe stderr: {}", probe_err.trim()),
+            });
+        }
+    } else if let Err(e) = probe_result {
+        write_log_line(&mut *log_file.lock().unwrap(), "stderr", &format!("Python probe failed: {e}"));
+    }
 
     for arg in &spec.args {
         cmd.arg(arg);
@@ -589,6 +637,7 @@ async fn run_python_cli(
 
     // Read stdout and stderr concurrently
     let app_handle = app.clone();
+    let log_file_clone = log_file.clone();
     let stdout_reader = tokio::spawn(async move {
         let reader = tokio::io::BufReader::new(stdout_handle);
         let mut lines = reader.lines();
@@ -596,6 +645,7 @@ async fn run_python_cli(
         while let Ok(Some(line)) = lines.next_line().await {
             collected.push_str(&line);
             collected.push('\n');
+            write_log_line(&mut *log_file_clone.lock().unwrap(), "stdout", &line);
             let payload = LogPayload {
                 stream: "stdout".to_string(),
                 line: line.clone(),
@@ -606,6 +656,7 @@ async fn run_python_cli(
     });
 
     let app_handle2 = app.clone();
+    let log_file_clone2 = log_file.clone();
     let stderr_reader = tokio::spawn(async move {
         let reader = tokio::io::BufReader::new(stderr_handle);
         let mut lines = reader.lines();
@@ -613,6 +664,7 @@ async fn run_python_cli(
         while let Ok(Some(line)) = lines.next_line().await {
             collected.push_str(&line);
             collected.push('\n');
+            write_log_line(&mut *log_file_clone2.lock().unwrap(), "stderr", &line);
             let payload = LogPayload {
                 stream: "stderr".to_string(),
                 line: line.clone(),
@@ -639,6 +691,18 @@ async fn run_python_cli(
     };
     let code = status.code().unwrap_or(-1);
     let finished_at = iso_now();
+
+    let stdout_len = stdout.len();
+    let stderr_len = stderr.len();
+    let summary = format!("Process finished: code={}, stdout_len={}, stderr_len={}", code, stdout_len, stderr_len);
+    write_log_line(&mut *log_file.lock().unwrap(), "system", &summary);
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: summary,
+        },
+    );
 
     Ok(ProcessOutput {
         code,

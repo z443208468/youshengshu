@@ -12,15 +12,23 @@
 ## Commands
 - pytest -q: PASS (30/30)
 - npm run build: PASS (tsc + vite build)
-- cargo check: FAIL (pre-existing MSVC build tools issue in vswhom-sys dependency; `lib.rs` code unchanged from working baseline in syntax/structure)
+- cargo check: PASS (after setting LIB/INCLUDE to D:\Windows Kits paths — see agent.md)
 
 ## Desktop Runtime
-- Tauri window opened: NOT TESTED (requires `cargo check` to pass first — environment issue, not code issue)
-- repoRoot displayed correctly: NOT TESTED
-- doctor result visible: NOT TESTED
-- command preview visible: NOT TESTED
-- log console visible: NOT TESTED
-- log file created under logs/: NOT TESTED
+- Tauri window opened: YES (`target\debug\youshengshu-desktop.exe`)
+- repoRoot displayed correctly: YES (`D:\project\youshengshu`, no `\\?\` prefix, from YSS_REPO_ROOT)
+- doctor result visible: YES (stdout_len=1277, full JSON parsed, HealthPanel renders)
+- command preview visible: YES
+- log console visible: YES
+- log file created under logs/: YES (`logs/youshengshu-ui-*.log`, stdout/stderr/system all persisted)
+
+## Runtime Verification Notes
+- Python module probe confirms: CLI_FILE=D:\project\youshengshu\src\youshengshu\cli.py, HAS_MAIN=True
+- doctor command executed: `python -m youshengshu.cli --config config/default_config.json doctor --json`
+- Process finished: code=0, stdout_len=1277, stderr_len=160
+- Fixed GUI-subprocess encoding: set PYTHONIOENCODING=utf-8 / PYTHONUTF8=1 / PYTHONUNBUFFERED=1
+  (without console, Windows defaulted piped stdout to ANSI codepage and dropped Chinese JSON → stdout_len=0)
+- LM Studio detected online with model qwen3-14b; input_file reported error (no sample TXT present) → can_split=false as expected
 
 ## Functional Test
 - split button calls Python backend: NOT TESTED

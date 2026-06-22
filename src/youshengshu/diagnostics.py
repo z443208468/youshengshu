@@ -103,7 +103,13 @@ def check_lmstudio(config_lmstudio) -> CheckResult:
     else:
         cfg = config_lmstudio
 
-    client = LMStudioClient(cfg)
+    # Use a short timeout (5s) for the diagnostic check — the config's
+    # request_timeout_seconds (default 600s) is meant for actual translation.
+    import copy
+    check_cfg = copy.copy(cfg)
+    check_cfg.request_timeout_seconds = 5
+
+    client = LMStudioClient(check_cfg)
     try:
         model_id = client.resolve_model_id()
         return _ok("lmstudio", f"LM Studio 可连接，当前模型: {model_id}", {"model_id": model_id})

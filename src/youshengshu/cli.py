@@ -14,7 +14,9 @@ from .translator import run_translation_pipeline
 def print_json(payload: dict) -> None:
     """Print a JSON payload to stdout (and only JSON). All non-JSON
     progress/info/warning messages must go to stderr to keep stdout parseable."""
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
 def _build_status_json(manifest: TranslationManifest) -> dict:

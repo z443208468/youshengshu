@@ -1,4 +1,5 @@
 import time
+import sys
 from openai import OpenAI
 from openai import APIError, APITimeoutError, RateLimitError
 
@@ -42,7 +43,8 @@ class LMStudioClient:
         if len(model_list) > 1:
             print(
                 f"[WARNING] LM Studio 返回多个模型，当前使用第一个：{model_id}。"
-                f"如需固定模型，请在 config/default_config.json 设置 lmstudio.model_id。"
+                f"如需固定模型，请在 config/default_config.json 设置 lmstudio.model_id。",
+                file=sys.stderr,
             )
 
         self._resolved_model_id = model_id
@@ -83,7 +85,8 @@ class LMStudioClient:
             except (APITimeoutError, RateLimitError, APIError) as e:
                 if attempt < max_retries - 1:
                     print(
-                        f"[WARNING] LM Studio 请求失败 (尝试 {attempt + 1}/{max_retries}): {e}"
+                        f"[WARNING] LM Studio 请求失败 (尝试 {attempt + 1}/{max_retries}): {e}",
+                        file=sys.stderr,
                     )
                     time.sleep(retry_sleep)
                 else:
