@@ -25,6 +25,7 @@ class Chapter:
 @dataclass
 class ChapterFileRecord:
     index: int
+    title: str
     filename: str
     filepath: str
     sha256: str
@@ -106,6 +107,7 @@ def write_chapters(
         records.append(
             ChapterFileRecord(
                 index=ch.index,
+                title=ch.title,
                 filename=filename,
                 filepath=str(filepath),
                 sha256=ch.sha256,

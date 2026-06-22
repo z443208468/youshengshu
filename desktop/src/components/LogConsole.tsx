@@ -3,13 +3,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Copy, Trash2 } from "lucide-react";
 import type { LogLine } from "@/types/app";
+import { LOG_VIEW_MAX_LINES } from "@/lib/config";
 
 interface LogConsoleProps {
   logs: LogLine[];
   onClear: () => void;
+  logFilePath: string | null;
 }
 
-export function LogConsole({ logs, onClear }: LogConsoleProps) {
+export function LogConsole({ logs, onClear, logFilePath }: LogConsoleProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export function LogConsole({ logs, onClear }: LogConsoleProps) {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-muted-foreground">
-          日志 ({logs.length} 行)
+          日志 ({logs.length} 行, 上限 {LOG_VIEW_MAX_LINES})
         </span>
         <div className="flex gap-1">
           <Button
@@ -50,6 +52,11 @@ export function LogConsole({ logs, onClear }: LogConsoleProps) {
           </Button>
         </div>
       </div>
+      {logFilePath && (
+        <p className="text-[10px] text-muted-foreground mb-1 truncate" title={logFilePath}>
+          日志文件: {logFilePath}
+        </p>
+      )}
 
       <ScrollArea className="flex-1 rounded-md border bg-black/30 p-2 font-mono text-xs leading-relaxed">
         {logs.length === 0 ? (

@@ -10,3 +10,6 @@ export const DEFAULT_SETTINGS: UiSettings = {
   manifestFile: "data/manifests/translation_manifest.json",
   lmStudioBaseUrl: "http://localhost:1234/v1",
 };
+
+// UI-only retention limit. Full logs are persisted to logs/*.log by Rust.
+export const LOG_VIEW_MAX_LINES = 2000;

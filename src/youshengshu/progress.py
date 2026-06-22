@@ -129,7 +129,7 @@ class TranslationManifest:
         chapters = [
             ManifestChapter(
                 index=r.index,
-                title="",
+                title=r.title,
                 en_path=r.filepath,
                 source_sha256=r.sha256,
                 translation_status=TRANSLATION_STATUS_PENDING,

@@ -70,3 +70,15 @@ def test_write_chapters():
             assert r.filename.startswith("chapter_")
             assert r.filename.endswith("_en.txt")
             assert Path(r.filepath).exists()
+
+
+def test_write_chapters_preserves_title():
+    """ChapterFileRecord should retain the title from Chapter."""
+    text = FIXTURE_PATH.read_text(encoding="utf-8")
+    chapters = split_chapters(text, min_valid_chapter_chars=500)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        records = write_chapters(chapters, Path(tmpdir))
+        for r in records:
+            assert r.title, f"Record {r.index} has empty title"
+

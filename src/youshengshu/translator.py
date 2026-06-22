@@ -8,6 +8,7 @@ from .lmstudio_client import LMStudioClient
 from .progress import (
     ManifestChapter,
     TranslationManifest,
+    TRANSLATION_STATUS_PENDING,
     TRANSLATION_STATUS_IN_PROGRESS,
     TRANSLATION_STATUS_DONE,
     TRANSLATION_STATUS_FAILED,
@@ -201,21 +202,36 @@ def run_translation_pipeline(
     manifest: TranslationManifest,
     max_chapters: int = 0,
 ) -> list[TranslationResult]:
-    """Translate all pending/failed chapters sequentially."""
+    """Translate all pending/failed chapters sequentially.
+
+    Process chapters in order. Each chapter is attempted at most once per
+    call: on failure the manifest status is set to 'failed' and the error is
+    persisted; on success the manifest status is set to 'done'.
+    """
 
     results: list[TranslationResult] = []
     translated = 0
+    manifest_path = Path(config.paths.manifest_file)
 
-    while True:
-        chapter = manifest.get_next_pending_chapter()
-        if chapter is None:
-            print("所有章节已完成，无需翻译。")
-            break
+    # Collect all chapters that need translation (in order)
+    chapters_to_translate: list[ManifestChapter] = []
+    for ch in manifest.chapters:
+        if ch.translation_status in (
+            TRANSLATION_STATUS_PENDING,
+            TRANSLATION_STATUS_FAILED,
+        ):
+            chapters_to_translate.append(ch)
 
-        if max_chapters > 0 and translated >= max_chapters:
-            break
+    if not chapters_to_translate:
+        print("所有章节已完成，无需翻译。")
+        return results
 
+    if max_chapters > 0:
+        chapters_to_translate = chapters_to_translate[:max_chapters]
+
+    for chapter in chapters_to_translate:
         print(f"\n翻译第 {chapter.index} 章: {chapter.title or ''}")
+
         try:
             result = translate_chapter(chapter, config, client, manifest)
             results.append(result)
@@ -223,12 +239,7 @@ def run_translation_pipeline(
             print(f"  完成: {result.cn_path} ({result.chunk_count} chunks)")
         except Exception as e:
             print(f"  [ERROR] 第 {chapter.index} 章翻译失败: {e}")
-            # Manifest already updated by translate_chapter on failure
-            # Continue to next chapter
-            continue
-
-        # Save manifest after each chapter
-        manifest_path = Path(config.paths.manifest_file)
-        manifest.save(manifest_path)
+        finally:
+            manifest.save(manifest_path)
 
     return results

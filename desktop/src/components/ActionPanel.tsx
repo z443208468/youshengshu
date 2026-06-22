@@ -21,6 +21,8 @@ interface ActionPanelProps {
   onOpenEnDir: () => void;
   onOpenCnDir: () => void;
   showStopButton: boolean;
+  canSplit?: boolean;
+  canTranslate?: boolean;
 }
 
 export function ActionPanel({
@@ -34,6 +36,8 @@ export function ActionPanel({
   onOpenEnDir,
   onOpenCnDir,
   showStopButton,
+  canSplit = true,
+  canTranslate = true,
 }: ActionPanelProps) {
   const isRunning =
     taskState === "splitting" ||
@@ -57,7 +61,8 @@ export function ActionPanel({
         variant="outline"
         size="sm"
         className="w-full justify-start text-xs"
-        disabled={isRunning}
+        disabled={isRunning || !canSplit}
+        title={!canSplit ? "环境不满足分章节条件" : undefined}
         onClick={onSplit}
       >
         {taskState === "splitting" ? (
@@ -87,7 +92,8 @@ export function ActionPanel({
         variant="default"
         size="sm"
         className="w-full justify-start text-xs"
-        disabled={isRunning}
+        disabled={isRunning || !canTranslate}
+        title={!canTranslate ? "翻译环境未就绪（检查 LM Studio）" : undefined}
         onClick={onTranslate}
       >
         {taskState === "translating" ? (
@@ -102,7 +108,8 @@ export function ActionPanel({
         variant="secondary"
         size="sm"
         className="w-full justify-start text-xs"
-        disabled={isRunning}
+        disabled={isRunning || !canTranslate}
+        title={!canTranslate ? "翻译环境未就绪（检查 LM Studio）" : undefined}
         onClick={onTranslateNext}
       >
         <StepForward className="mr-2 h-3.5 w-3.5" />

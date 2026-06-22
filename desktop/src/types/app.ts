@@ -18,6 +18,30 @@ export interface UiSettings {
   lmStudioBaseUrl: string;
 }
 
+export interface AppContext {
+  repoRoot: string;
+  configPath: string;
+  pythonCommand: string;
+  isValidRepoRoot: boolean;
+  detectedFrom: string;
+  cliPath: string;
+}
+
+export interface CheckResult {
+  name: string;
+  ok: boolean;
+  severity: "info" | "warning" | "error";
+  message: string;
+  detail: Record<string, unknown>;
+}
+
+export interface DoctorPayload {
+  ok: boolean;
+  canSplit: boolean;
+  canTranslate: boolean;
+  checks: CheckResult[];
+}
+
 export interface ChapterRow {
   index: number;
   title: string;
@@ -56,4 +80,7 @@ export interface ProcessOutput {
   code: number;
   stdout: string;
   stderr: string;
+  commandLine: string;
+  startedAt: string;
+  finishedAt: string;
 }

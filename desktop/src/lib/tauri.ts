@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { UiSettings, LogLine, ProcessOutput } from "@/types/app";
+import type {
+  UiSettings,
+  LogLine,
+  ProcessOutput,
+  AppContext,
+} from "@/types/app";
 
 let logCounter = 0;
 function nextLogId(): string {
@@ -20,6 +25,17 @@ export async function getRepoRoot(): Promise<string> {
   return invoke<string>("get_repo_root");
 }
 
+export async function resolveAppContext(): Promise<AppContext> {
+  return invoke<AppContext>("resolve_app_context");
+}
+
+export async function resolvePath(
+  repoRoot: string,
+  rawPath: string,
+): Promise<string> {
+  return invoke<string>("resolve_path", { repoRoot, rawPath });
+}
+
 export async function readConfig(
   configPath: string,
 ): Promise<Record<string, unknown>> {
@@ -28,9 +44,7 @@ export async function readConfig(
   });
 }
 
-export async function writeConfig(
-  settings: UiSettings,
-): Promise<void> {
+export async function writeConfig(settings: UiSettings): Promise<void> {
   return invoke<void>("write_youshengshu_config", { paths: settings });
 }
 
