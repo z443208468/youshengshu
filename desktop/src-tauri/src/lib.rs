@@ -155,7 +155,16 @@ fn repo_root_candidates() -> Vec<std::path::PathBuf> {
 }
 
 fn canonicalize_if_possible(p: std::path::PathBuf) -> std::path::PathBuf {
-    std::fs::canonicalize(&p).unwrap_or(p)
+    let canonical = std::fs::canonicalize(&p).unwrap_or(p);
+    // On Windows, std::fs::canonicalize returns paths with \\?\ prefix
+    // (extended-length path). This prefix breaks subprocess execution
+    // (current_dir, env, etc.) so we strip it.
+    let s = canonical.to_string_lossy().to_string();
+    if cfg!(windows) && s.starts_with("\\\\?\\") {
+        std::path::PathBuf::from(&s[4..])
+    } else {
+        canonical
+    }
 }
 
 fn find_repo_root() -> Option<std::path::PathBuf> {
@@ -444,13 +453,12 @@ fn build_python_cli_command(
         ));
     }
 
-    let args_str = format!("{}", cli_command);
     let mut args: Vec<String> = vec![
         "-m".to_string(),
         PYTHON_MODULE_NAME.to_string(),
-        cli_command.to_string(),
         "--config".to_string(),
         config_path.to_string(),
+        cli_command.to_string(),
     ];
 
     if json_output {
@@ -467,7 +475,7 @@ fn build_python_cli_command(
     }
 
     let src_dir = repo_root_path.join("src");
-    let display = format!("{} -m youshengshu.cli {} --config {}", python_command, args_str, config_path);
+    let display = format!("{} {}", python_command, args.join(" "));
 
     Ok(CommandSpec {
         program: python_command.to_string(),
