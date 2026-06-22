@@ -27,6 +27,8 @@ npm run build
 if errorlevel 1 exit /b 1
 
 echo [CHECK] Rust cargo check
+call "%REPO_ROOT%setup_msvc_env.bat"
+if errorlevel 1 exit /b 1
 cd /d "%REPO_ROOT%desktop\src-tauri"
 cargo check
 if errorlevel 1 exit /b 1

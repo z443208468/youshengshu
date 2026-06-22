@@ -26,7 +26,7 @@ struct UiPaths {
     en_chapters_dir: String,
     cn_chapters_dir: String,
     manifest_file: String,
-    lmstudio_base_url: String,
+    lm_studio_base_url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +59,35 @@ struct LogPayload {
 
 /// Holds an optional reference to a running child process so we can kill it.
 struct ActiveProcess(Mutex<Option<Child>>);
+
+/// Persists UI log lines (config save, errors, etc.) for the app session.
+struct UiSessionLog(Mutex<Option<std::fs::File>>);
+
+fn open_session_log_file(repo_root: &std::path::Path) -> Result<std::fs::File, String> {
+    let log_dir = repo_root.join("logs");
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("创建日志目录失败: {e}"))?;
+    let filename = format!("youshengshu-session-{}.log", iso_now_compact());
+    let path = log_dir.join(&filename);
+    let file = std::fs::File::create(&path)
+        .map_err(|e| format!("创建会话日志失败: {e}"))?;
+    Ok(file)
+}
+
+fn append_session_log(state: &UiSessionLog, stream: &str, line: &str) {
+    let mut guard = state.0.lock().unwrap();
+    if guard.is_none() {
+        let repo_root = find_repo_root().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        if let Ok(file) = open_session_log_file(&repo_root) {
+            *guard = Some(file);
+        }
+    }
+    if let Some(ref mut file) = *guard {
+        write_log_line(file, stream, line);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -399,7 +428,7 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
     if let Some(obj) = config.as_object_mut() {
         obj.insert("paths".to_string(), paths_obj);
         let lmstudio = serde_json::json!({
-            "base_url": paths.lmstudio_base_url,
+            "base_url": paths.lm_studio_base_url,
             "api_key": "lm-studio",
             "model_id": "auto",
             "temperature": 0.2,
@@ -421,6 +450,16 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
         serde_json::to_string_pretty(&config).map_err(|e| format!("序列化配置失败: {e}"))?;
     std::fs::write(config_path, json_string).map_err(|e| format!("写入配置失败: {e}"))?;
 
+    Ok(())
+}
+
+#[tauri::command]
+fn append_ui_log(
+    stream: String,
+    line: String,
+    ui_log: tauri::State<'_, UiSessionLog>,
+) -> Result<(), String> {
+    append_session_log(&ui_log, &stream, &line);
     Ok(())
 }
 
@@ -745,12 +784,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(ActiveProcess(Mutex::new(None)))
+        .manage(UiSessionLog(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_repo_root,
             resolve_app_context,
             resolve_path,
             read_youshengshu_config,
             write_youshengshu_config,
+            append_ui_log,
             run_python_cli,
             kill_python_process,
         ])
@@ -787,6 +828,22 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ui_paths_deserializes_lm_studio_base_url() {
+        let json = r#"{
+            "repoRoot": "D:\\repo",
+            "configPath": "config/default_config.json",
+            "pythonCommand": "python",
+            "inputFile": "data/input/book.txt",
+            "enChaptersDir": "data/en_chapters",
+            "cnChaptersDir": "data/cn_chapters",
+            "manifestFile": "data/manifests/translation_manifest.json",
+            "lmStudioBaseUrl": "http://localhost:1234/v1"
+        }"#;
+        let paths: UiPaths = serde_json::from_str(json).unwrap();
+        assert_eq!(paths.lm_studio_base_url, "http://localhost:1234/v1");
     }
 
     #[test]

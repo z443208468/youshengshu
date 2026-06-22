@@ -32,7 +32,20 @@ Set-Location d:\project\youshengshu\desktop\src-tauri
 cargo check
 ```
 
-### 长期修复（推荐）
+### 脚本自动修复（推荐）
+
+仓库根目录的 `setup_msvc_env.bat` 会在启动 Tauri / cargo 前：
+
+1. 调用 `vcvars64.bat` 初始化 MSVC 工具链（`cl.exe` / `link.exe`）
+2. 将 `LIB` / `INCLUDE` 指向 `D:\Windows Kits` 上的 SDK（自动选取最新 MSVC / SDK 版本目录）
+
+以下脚本已集成该逻辑，双击即可，无需手动设环境变量：
+
+- `run_youshengshu.bat`
+- `dev_check.bat`
+- `build_release.bat`
+
+### 长期修复（可选）
 
 在系统环境变量 `LIB` 和 `INCLUDE` 中永久添加 `D:\Windows Kits` 路径：
 

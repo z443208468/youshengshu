@@ -16,6 +16,7 @@ import {
   resolvePath,
   readConfig,
   writeConfig,
+  appendUiLog,
   runPythonCli,
   killPythonProcess,
   listenToLogs,
@@ -50,6 +51,7 @@ export default function App() {
     config: Record<string, unknown>,
   ): UiSettings {
     const paths = (config.paths as Record<string, string>) || {};
+    const lmstudio = (config.lmstudio as Record<string, string>) || {};
     return {
       repoRoot: context.repoRoot,
       configPath: context.configPath,
@@ -58,7 +60,8 @@ export default function App() {
       enChaptersDir: paths.en_chapters_dir || DEFAULT_SETTINGS.enChaptersDir,
       cnChaptersDir: paths.cn_chapters_dir || DEFAULT_SETTINGS.cnChaptersDir,
       manifestFile: paths.manifest_file || DEFAULT_SETTINGS.manifestFile,
-      lmStudioBaseUrl: DEFAULT_SETTINGS.lmStudioBaseUrl,
+      lmStudioBaseUrl:
+        lmstudio.base_url || DEFAULT_SETTINGS.lmStudioBaseUrl,
     };
   }
 
@@ -71,6 +74,7 @@ export default function App() {
       }
       return next;
     });
+    void appendUiLog(stream, text).catch(() => {});
   }, []);
 
   // ---- Run doctor command ----

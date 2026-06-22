@@ -44,6 +44,13 @@ export async function readConfig(
   });
 }
 
+export async function appendUiLog(
+  stream: LogLine["stream"],
+  line: string,
+): Promise<void> {
+  return invoke<void>("append_ui_log", { stream, line });
+}
+
 export async function writeConfig(settings: UiSettings): Promise<void> {
   return invoke<void>("write_youshengshu_config", { paths: settings });
 }

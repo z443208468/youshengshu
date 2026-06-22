@@ -11,5 +11,6 @@ export const DEFAULT_SETTINGS: UiSettings = {
   lmStudioBaseUrl: "http://localhost:1234/v1",
 };
 
-// UI-only retention limit. Full logs are persisted to logs/*.log by Rust.
+// UI panel keeps the last N lines. Full UI events go to logs/youshengshu-session-*.log;
+// each Python CLI task also writes logs/youshengshu-ui-*.log.
 export const LOG_VIEW_MAX_LINES = 2000;

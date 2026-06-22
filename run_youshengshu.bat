@@ -51,6 +51,16 @@ if not exist "node_modules" (
 )
 
 set YSS_REPO_ROOT=%REPO_ROOT%
+
+call "%REPO_ROOT%setup_msvc_env.bat"
+if errorlevel 1 (
+  echo [ERROR] MSVC/Windows SDK environment setup failed.
+  echo [ERROR] See agent.md for manual LIB/INCLUDE configuration.
+  pause
+  exit /b 1
+)
+echo [SYSTEM] MSVC/SDK env ready (MSVC %MSVC_VER%, SDK %SDK_VER%)
+
 echo [SYSTEM] Launching Tauri desktop app...
 npm run tauri dev
 
