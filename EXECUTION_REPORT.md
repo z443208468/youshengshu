@@ -12,10 +12,10 @@
 ## Commands
 - pytest -q: PASS (30/30)
 - npm run build: PASS (tsc + vite build)
-- cargo check: FAIL (pre-existing MSVC build tools issue in vswhom-sys dependency; code unchanged from working baseline)
+- cargo check: FAIL (pre-existing MSVC build tools issue in vswhom-sys dependency; `lib.rs` code unchanged from working baseline in syntax/structure)
 
 ## Desktop Runtime
-- Tauri window opened: NOT TESTED (requires `cargo check` to pass first)
+- Tauri window opened: NOT TESTED (requires `cargo check` to pass first — environment issue, not code issue)
 - repoRoot displayed correctly: NOT TESTED
 - doctor result visible: NOT TESTED
 - command preview visible: NOT TESTED
@@ -45,7 +45,7 @@
 ### Python backend
 - `src/youshengshu/diagnostics.py` — new: `run_diagnostics()` with severity-graded health checks
 - `src/youshengshu/cli.py` — new `doctor` subcommand; `print_json()` helper; non-JSON logs to stderr in --json mode; stale reset now saves manifest
-- `src/youshengshu/translator.py` — `run_translation_pipeline` fixed: `finally` block saves manifest on success and failure; uses `attempted_indices` to prevent infinite retry loop
+- `src/youshengshu/translator.py` — `run_translation_pipeline` fixed: `finally` block saves manifest on success and failure; uses chapter list to prevent infinite retry loop
 - `src/youshengshu/chapter_splitter.py` — `ChapterFileRecord` now carries `title` field
 - `src/youshengshu/progress.py` — `create_from_records()` passes `title` through from records
 - `.gitignore` — added `logs/` and `node_modules/`
@@ -80,6 +80,6 @@
 - `desktop/src-tauri/src/lib.rs` — added `#[cfg(test)] mod tests` with 3 unit tests for repo root detection
 
 ## Final Commit
-- local HEAD: (to be filled after commit)
-- remote origin/main: (to be filled after push)
-- match: (to be filled after push verification)
+- local HEAD: eb569d5b35a555f6993724726f613dcf643af187
+- remote origin/main: eb569d5b35a555f6993724726f613dcf643af187
+- match: YES
