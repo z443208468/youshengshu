@@ -1,8 +1,13 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from .exceptions import ConfigError
+
+
+def _filter_dataclass_kwargs(cls, data: dict) -> dict:
+    allowed = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in allowed}
 
 
 @dataclass
@@ -26,30 +31,17 @@ class LMStudioConfig:
     model_id: str = "auto"
     temperature: float = 0.2
     top_p: float = 0.85
-    # Manual output cap sent to LM Studio as max_tokens.
-    max_output_tokens: int = 2048
-    # Local inference can be slow. Timeout is configurable.
-    request_timeout_seconds: int = 900
-    # Total request attempts (not "extra retries after failure"). See hard constraint H.
+    request_timeout_seconds: int = 1800
     max_retries: int = 1
     retry_sleep_seconds: int = 5
 
 
 @dataclass
 class ChunkingConfig:
-    # Manual context window. User must match LM Studio Local Server context length.
-    context_tokens: int = 8192
-    # Currently informational/config sanity only.
-    # Runtime budget uses estimated prompt_tokens from the actual prompt text,
-    # not this reserved_prompt_tokens field.
-    reserved_prompt_tokens: int = 1800
-    # Reserved response budget. Should normally match lmstudio.max_output_tokens.
-    reserved_output_tokens: int = 2048
-    safety_ratio: float = 0.65
-    english_chars_per_token: float = 4.0
-    cjk_chars_per_token: float = 1.2
-    split_mode: str = "paragraph_sentence_word"
-    allow_word_split: bool = False
+    min_unit: str = "paragraph"
+    initial_paragraphs_per_batch: int = 8
+    min_paragraphs_per_batch: int = 1
+    overflow_backoff_factor: float = 0.5
 
 
 @dataclass
@@ -83,9 +75,13 @@ def load_config(config_path: str) -> AppConfig:
     translation_data = data.get("translation", {})
 
     return AppConfig(
-        paths=PathsConfig(**paths_data),
-        chapter_split=ChapterSplitConfig(**chapter_split_data),
-        lmstudio=LMStudioConfig(**lmstudio_data),
-        chunking=ChunkingConfig(**chunking_data),
-        translation=TranslationConfig(**translation_data),
+        paths=PathsConfig(**_filter_dataclass_kwargs(PathsConfig, paths_data)),
+        chapter_split=ChapterSplitConfig(
+            **_filter_dataclass_kwargs(ChapterSplitConfig, chapter_split_data)
+        ),
+        lmstudio=LMStudioConfig(**_filter_dataclass_kwargs(LMStudioConfig, lmstudio_data)),
+        chunking=ChunkingConfig(**_filter_dataclass_kwargs(ChunkingConfig, chunking_data)),
+        translation=TranslationConfig(
+            **_filter_dataclass_kwargs(TranslationConfig, translation_data)
+        ),
     )

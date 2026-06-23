@@ -28,12 +28,16 @@ def _make_config(tmpdir: Path, input_file: str = "") -> Path:
             "model_id": "auto",
             "temperature": 0.2,
             "top_p": 0.85,
-            "max_output_tokens": 4096,
             "request_timeout_seconds": 1,
             "max_retries": 1,
             "retry_sleep_seconds": 1,
         },
-        "chunking": {},
+        "chunking": {
+            "min_unit": "paragraph",
+            "initial_paragraphs_per_batch": 8,
+            "min_paragraphs_per_batch": 1,
+            "overflow_backoff_factor": 0.5,
+        },
         "translation": {},
     }
     config_path = tmpdir / "config.json"

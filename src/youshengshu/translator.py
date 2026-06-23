@@ -1,9 +1,9 @@
-import time
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import AppConfig, ChunkingConfig
-from .exceptions import TranslationValidationError
+from .config import AppConfig
+from .exceptions import TranslationValidationError, ContextOverflowError
 from .lmstudio_client import LMStudioClient
 from .progress import (
     ManifestChapter,
@@ -13,11 +13,7 @@ from .progress import (
     TRANSLATION_STATUS_DONE,
     TRANSLATION_STATUS_FAILED,
 )
-from .text_utils import (
-    split_text_for_translation,
-    calculate_chunk_budget,
-    describe_chunks,
-)
+from .text_utils import split_paragraph_blocks
 from .validation import strip_known_preambles, validate_translation_chunk
 
 SYSTEM_PROMPT = "你是严格的英译中小说翻译引擎。你只输出中文译文，不输出解释、分析、总结或额外说明。"
@@ -95,6 +91,31 @@ class TranslationResult:
     model_id: str
 
 
+def _validated_initial_batch_size(config: AppConfig) -> int:
+    size = int(config.chunking.initial_paragraphs_per_batch)
+    min_size = int(config.chunking.min_paragraphs_per_batch)
+
+    if min_size != 1:
+        raise ValueError("chunking.min_paragraphs_per_batch 必须为 1。")
+    if size < 1:
+        raise ValueError("chunking.initial_paragraphs_per_batch 必须 >= 1。")
+    if not (0 < float(config.chunking.overflow_backoff_factor) < 1):
+        raise ValueError("chunking.overflow_backoff_factor 必须在 (0, 1) 范围内。")
+
+    return size
+
+
+def _reduce_batch_size(current: int, factor: float) -> int:
+    if current <= 1:
+        return 1
+
+    reduced = max(1, math.floor(current * factor))
+    if reduced >= current:
+        reduced = current - 1
+
+    return max(1, reduced)
+
+
 def translate_chapter(
     chapter_record: ManifestChapter,
     config: AppConfig,
@@ -108,55 +129,37 @@ def translate_chapter(
         raise FileNotFoundError(f"英文章节文件不存在: {en_path}")
 
     chapter_text = en_path.read_text(encoding="utf-8")
+    paragraphs = split_paragraph_blocks(chapter_text)
+    if not paragraphs:
+        raise ValueError("章节没有可翻译段落。")
+
     model_id = client._resolved_model_id or "unknown"
 
-    # Set status to in_progress
     manifest.set_chapter_status(
         chapter_record.index,
         TRANSLATION_STATUS_IN_PROGRESS,
     )
 
-    # Calculate prompt text (without source) for chunk budget
-    prompt_prefix = USER_PROMPT_TEMPLATE.split("{source_chunk}")[0]
-    prompt_suffix = USER_PROMPT_TEMPLATE.split("{source_chunk}")[1]
-    prompt_text_without_source = SYSTEM_PROMPT + "\n\n" + prompt_prefix + prompt_suffix
+    batch_size = _validated_initial_batch_size(config)
+    backoff_factor = float(config.chunking.overflow_backoff_factor)
 
-    budget = calculate_chunk_budget(
-        config.chunking,
-        prompt_text_without_source,
-    )
+    translated_batches: list[str] = []
+    cursor = 0
+    batch_count = 0
 
-    chunks = split_text_for_translation(
-        chapter_text,
-        config.chunking,
-        prompt_text_without_source,
-    )
-
-    chunk_infos = describe_chunks(chunks, config.chunking)
-
-    print(
-        f"  Chunk plan: chapter_index={chapter_record.index}, "
-        f"chunks={len(chunks)}, "
-        f"context_tokens={budget.context_tokens}, "
-        f"prompt_tokens≈{budget.prompt_tokens}, "
-        f"reserved_output_tokens={budget.reserved_output_tokens}, "
-        f"safety_ratio={budget.safety_ratio}, "
-        f"available_source_tokens={budget.available_source_tokens}",
-        flush=True,
-    )
-
-    translated_chunks: list[str] = []
     cn_partial_path = Path(chapter_record.cn_path.replace("_cn.txt", "_cn.partial.txt"))
     cn_tmp_path = Path(chapter_record.cn_path + ".tmp")
     cn_final_path = Path(chapter_record.cn_path)
 
-    for i, chunk in enumerate(chunks):
-        info = chunk_infos[i]
+    while cursor < len(paragraphs):
+        batch = paragraphs[cursor : cursor + batch_size]
+        source_chunk = "\n\n".join(batch)
+
         print(
-            f"  Chunk {i + 1}/{len(chunks)} "
-            f"(estimated_tokens≈{info.estimated_tokens}, "
-            f"chars={info.chars}, "
-            f"paragraphs={info.paragraphs})...",
+            f"  Paragraph batch: chapter_index={chapter_record.index}, "
+            f"cursor={cursor}, "
+            f"batch_size={len(batch)}, "
+            f"paragraphs_total={len(paragraphs)}",
             flush=True,
         )
 
@@ -164,15 +167,38 @@ def translate_chapter(
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": USER_PROMPT_TEMPLATE.replace("{source_chunk}", chunk),
+                "content": USER_PROMPT_TEMPLATE.replace("{source_chunk}", source_chunk),
             },
         ]
 
         try:
-            result = client.translate(
-                messages,
-                max_tokens=config.lmstudio.max_output_tokens,
+            result = client.translate(messages)
+
+        except ContextOverflowError as e:
+            if batch_size <= 1:
+                error = (
+                    "单个段落超过 LM Studio 当前上下文能力，程序不会拆分段落。"
+                    f" chapter_index={chapter_record.index}, "
+                    f"paragraph_index={cursor}, "
+                    f"paragraph_chars={len(batch[0])}, "
+                    f"error={e}"
+                )
+                manifest.set_chapter_status(
+                    chapter_record.index,
+                    TRANSLATION_STATUS_FAILED,
+                    error=error,
+                )
+                raise ContextOverflowError(error) from e
+
+            new_batch_size = _reduce_batch_size(batch_size, backoff_factor)
+            print(
+                f"  Context overflow, reduce paragraph batch size: "
+                f"{batch_size} -> {new_batch_size}",
+                flush=True,
             )
+            batch_size = new_batch_size
+            continue
+
         except Exception as e:
             manifest.set_chapter_status(
                 chapter_record.index,
@@ -185,7 +211,7 @@ def translate_chapter(
             result = strip_known_preambles(result)
 
         try:
-            validate_translation_chunk(chunk, result)
+            validate_translation_chunk(source_chunk, result)
         except TranslationValidationError as e:
             manifest.set_chapter_status(
                 chapter_record.index,
@@ -194,36 +220,33 @@ def translate_chapter(
             )
             raise
 
-        translated_chunks.append(result)
+        translated_batches.append(result)
+        batch_count += 1
+        cursor += len(batch)
 
         if config.translation.write_partial_file:
             cn_partial_path.parent.mkdir(parents=True, exist_ok=True)
-            partial_text = "\n\n".join(translated_chunks)
-            cn_partial_path.write_text(partial_text, encoding="utf-8")
+            cn_partial_path.write_text("\n\n".join(translated_batches), encoding="utf-8")
 
-    # All chunks done - atomic write
-    final_text = "\n\n".join(translated_chunks)
-
+    final_text = "\n\n".join(translated_batches)
     cn_final_path.parent.mkdir(parents=True, exist_ok=True)
     cn_tmp_path.write_text(final_text, encoding="utf-8")
     cn_tmp_path.replace(cn_final_path)
 
-    # Delete partial file
     if cn_partial_path.exists():
         cn_partial_path.unlink()
 
-    # Update manifest as done
     manifest.set_chapter_status(
         chapter_record.index,
         TRANSLATION_STATUS_DONE,
         model=model_id,
-        chunk_count=len(chunks),
+        chunk_count=batch_count,
     )
 
     return TranslationResult(
         chapter_index=chapter_record.index,
         cn_path=str(cn_final_path),
-        chunk_count=len(chunks),
+        chunk_count=batch_count,
         model_id=model_id,
     )
 
@@ -242,10 +265,8 @@ def run_translation_pipeline(
     """
 
     results: list[TranslationResult] = []
-    translated = 0
     manifest_path = Path(config.paths.manifest_file)
 
-    # Collect all chapters that need translation (in order)
     chapters_to_translate: list[ManifestChapter] = []
     for ch in manifest.chapters:
         if ch.translation_status in (
@@ -267,7 +288,6 @@ def run_translation_pipeline(
         try:
             result = translate_chapter(chapter, config, client, manifest)
             results.append(result)
-            translated += 1
             print(f"  完成: {result.cn_path} ({result.chunk_count} chunks)")
         except Exception as e:
             print(f"  [ERROR] 第 {chapter.index} 章翻译失败: {e}")

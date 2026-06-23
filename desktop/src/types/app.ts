@@ -16,13 +16,6 @@ export interface UiSettings {
   cnChaptersDir: string;
   manifestFile: string;
   lmStudioBaseUrl: string;
-  lmStudioMaxOutputTokens: number;
-  lmStudioRequestTimeoutSeconds: number;
-  lmStudioMaxRetries: number;
-  chunkingContextTokens: number;
-  chunkingReservedOutputTokens: number;
-  chunkingSafetyRatio: number;
-  chunkingAllowWordSplit: boolean;
 }
 
 export interface AppContext {

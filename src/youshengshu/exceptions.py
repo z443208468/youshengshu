@@ -14,5 +14,9 @@ class LMStudioError(YoushengshuError):
     """LM Studio API error."""
 
 
+class ContextOverflowError(LMStudioError):
+    """LM Studio rejected the request because the prompt exceeded context."""
+
+
 class TranslationValidationError(YoushengshuError):
     """Translation validation error."""

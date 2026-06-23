@@ -4,7 +4,7 @@ from openai import OpenAI
 from openai import APIError, APITimeoutError, RateLimitError
 
 from .config import LMStudioConfig
-from .exceptions import LMStudioError
+from .exceptions import LMStudioError, ContextOverflowError
 
 
 class LMStudioClient:
@@ -17,6 +17,22 @@ class LMStudioClient:
             max_retries=0,  # We handle retries ourselves
         )
         self._resolved_model_id: str | None = None
+
+    @staticmethod
+    def is_context_overflow_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        patterns = [
+            "context length",
+            "context window",
+            "maximum context",
+            "too many tokens",
+            "prompt is too long",
+            "exceeds context",
+            "tokens exceed",
+            "token limit",
+            "maximum token",
+        ]
+        return any(pattern in text for pattern in patterns)
 
     def resolve_model_id(self) -> str:
         """Auto-detect the currently loaded model in LM Studio."""
@@ -71,23 +87,23 @@ class LMStudioClient:
                 f"max_retries 必须 >= 1（总尝试次数），当前为 {max_retries}。"
             )
 
-        effective_max_tokens = (
-            max_tokens if max_tokens is not None else self.config.max_output_tokens
-        )
-        if effective_max_tokens <= 0:
-            raise LMStudioError(
-                f"max_tokens 必须大于 0，当前为 {effective_max_tokens}。"
-            )
+        request_kwargs = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": self.config.temperature if temperature is None else temperature,
+            "top_p": self.config.top_p if top_p is None else top_p,
+        }
+
+        if max_tokens is not None:
+            if max_tokens <= 0:
+                raise LMStudioError(
+                    f"max_tokens 必须大于 0，当前为 {max_tokens}。"
+                )
+            request_kwargs["max_tokens"] = max_tokens
 
         for attempt in range(max_retries):
             try:
-                response = self._client.chat.completions.create(
-                    model=model_id,
-                    messages=messages,
-                    temperature=temperature or self.config.temperature,
-                    top_p=top_p or self.config.top_p,
-                    max_tokens=effective_max_tokens,
-                )
+                response = self._client.chat.completions.create(**request_kwargs)
 
                 content = response.choices[0].message.content
                 if content is None:
@@ -96,6 +112,9 @@ class LMStudioClient:
                 return content
 
             except (APITimeoutError, RateLimitError, APIError) as e:
+                if self.is_context_overflow_error(e):
+                    raise ContextOverflowError(str(e)) from e
+
                 if attempt < max_retries - 1:
                     print(
                         f"[WARNING] LM Studio 请求失败 (尝试 {attempt + 1}/{max_retries}): {e}",
@@ -106,4 +125,8 @@ class LMStudioClient:
                     raise LMStudioError(
                         f"LM Studio 请求在 {max_retries} 次尝试后仍然失败: {e}"
                     ) from e
+            except Exception as e:
+                if self.is_context_overflow_error(e):
+                    raise ContextOverflowError(str(e)) from e
+                raise
         raise LMStudioError("LM Studio 请求失败（未知错误）。")

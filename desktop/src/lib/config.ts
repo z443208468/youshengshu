@@ -9,13 +9,6 @@ export const DEFAULT_SETTINGS: UiSettings = {
   cnChaptersDir: "data/cn_chapters",
   manifestFile: "data/manifests/translation_manifest.json",
   lmStudioBaseUrl: "http://localhost:1234/v1",
-  lmStudioMaxOutputTokens: 2048,
-  lmStudioRequestTimeoutSeconds: 900,
-  lmStudioMaxRetries: 1,
-  chunkingContextTokens: 8192,
-  chunkingReservedOutputTokens: 2048,
-  chunkingSafetyRatio: 0.65,
-  chunkingAllowWordSplit: false,
 };
 
 // UI panel keeps the last N lines. Full UI events go to logs/youshengshu-session-*.log;

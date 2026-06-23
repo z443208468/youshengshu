@@ -96,10 +96,10 @@ def check_manifest_parent(raw_path: str) -> CheckResult:
 
 
 def check_lmstudio(config_lmstudio) -> CheckResult:
-    from .config import LMStudioConfig
+    from .config import LMStudioConfig, _filter_dataclass_kwargs
 
     if isinstance(config_lmstudio, dict):
-        cfg = LMStudioConfig(**config_lmstudio)
+        cfg = LMStudioConfig(**_filter_dataclass_kwargs(LMStudioConfig, config_lmstudio))
     else:
         cfg = config_lmstudio
 

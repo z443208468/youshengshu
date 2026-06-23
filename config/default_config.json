@@ -15,20 +15,15 @@
     "model_id": "auto",
     "temperature": 0.2,
     "top_p": 0.85,
-    "max_output_tokens": 2048,
-    "request_timeout_seconds": 900,
+    "request_timeout_seconds": 1800,
     "max_retries": 1,
     "retry_sleep_seconds": 5
   },
   "chunking": {
-    "context_tokens": 8192,
-    "reserved_prompt_tokens": 1800,
-    "reserved_output_tokens": 2048,
-    "safety_ratio": 0.65,
-    "english_chars_per_token": 4.0,
-    "cjk_chars_per_token": 1.2,
-    "split_mode": "paragraph_sentence_word",
-    "allow_word_split": false
+    "min_unit": "paragraph",
+    "initial_paragraphs_per_batch": 8,
+    "min_paragraphs_per_batch": 1,
+    "overflow_backoff_factor": 0.5
   },
   "translation": {
     "skip_existing_done_chapters": true,

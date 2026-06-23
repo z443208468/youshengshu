@@ -27,44 +27,6 @@ struct UiPaths {
     cn_chapters_dir: String,
     manifest_file: String,
     lm_studio_base_url: String,
-    #[serde(default = "default_lm_studio_max_output_tokens")]
-    lm_studio_max_output_tokens: i64,
-    #[serde(default = "default_lm_studio_request_timeout_seconds")]
-    lm_studio_request_timeout_seconds: i64,
-    #[serde(default = "default_lm_studio_max_retries")]
-    lm_studio_max_retries: i64,
-    #[serde(default = "default_chunking_context_tokens")]
-    chunking_context_tokens: i64,
-    #[serde(default = "default_chunking_reserved_output_tokens")]
-    chunking_reserved_output_tokens: i64,
-    #[serde(default = "default_chunking_safety_ratio")]
-    chunking_safety_ratio: f64,
-    #[serde(default)]
-    chunking_allow_word_split: bool,
-}
-
-fn default_lm_studio_max_output_tokens() -> i64 {
-    2048
-}
-
-fn default_lm_studio_request_timeout_seconds() -> i64 {
-    900
-}
-
-fn default_lm_studio_max_retries() -> i64 {
-    1
-}
-
-fn default_chunking_context_tokens() -> i64 {
-    8192
-}
-
-fn default_chunking_reserved_output_tokens() -> i64 {
-    2048
-}
-
-fn default_chunking_safety_ratio() -> f64 {
-    0.65
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -393,20 +355,15 @@ fn read_youshengshu_config(
                 "model_id": "auto",
                 "temperature": 0.2,
                 "top_p": 0.85,
-                "max_output_tokens": 2048,
-                "request_timeout_seconds": 900,
+                "request_timeout_seconds": 1800,
                 "max_retries": 1,
                 "retry_sleep_seconds": 5
             },
             "chunking": {
-                "context_tokens": 8192,
-                "reserved_prompt_tokens": 1800,
-                "reserved_output_tokens": 2048,
-                "safety_ratio": 0.65,
-                "english_chars_per_token": 4.0,
-                "cjk_chars_per_token": 1.2,
-                "split_mode": "paragraph_sentence_word",
-                "allow_word_split": false
+                "min_unit": "paragraph",
+                "initial_paragraphs_per_batch": 8,
+                "min_paragraphs_per_batch": 1,
+                "overflow_backoff_factor": 0.5
             },
             "translation": {
                 "skip_existing_done_chapters": true,
@@ -440,25 +397,6 @@ fn ensure_json_object<'a>(
 fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
     if paths.repo_root.trim().is_empty() {
         return Err("项目根目录 repoRoot 为空，请先在 UI 中选择仓库根目录".to_string());
-    }
-
-    if paths.lm_studio_max_output_tokens <= 0 {
-        return Err("max_output_tokens 必须大于 0".to_string());
-    }
-    if paths.lm_studio_request_timeout_seconds <= 0 {
-        return Err("request_timeout_seconds 必须大于 0".to_string());
-    }
-    if paths.lm_studio_max_retries < 1 {
-        return Err("max_retries 必须 >= 1（请求尝试次数/总次数）".to_string());
-    }
-    if paths.chunking_context_tokens <= 0 {
-        return Err("context_tokens 必须大于 0".to_string());
-    }
-    if paths.chunking_reserved_output_tokens <= 0 {
-        return Err("reserved_output_tokens 必须大于 0".to_string());
-    }
-    if !(paths.chunking_safety_ratio > 0.0 && paths.chunking_safety_ratio <= 1.0) {
-        return Err("safety_ratio 必须在 (0, 1] 范围内".to_string());
     }
 
     let repo_root_path = std::path::Path::new(&paths.repo_root);
@@ -499,14 +437,10 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
                 "min_valid_chapter_chars": 3000
             },
             "chunking": {
-                "context_tokens": 8192,
-                "reserved_prompt_tokens": 1800,
-                "reserved_output_tokens": 2048,
-                "safety_ratio": 0.65,
-                "english_chars_per_token": 4.0,
-                "cjk_chars_per_token": 1.2,
-                "split_mode": "paragraph_sentence_word",
-                "allow_word_split": false
+                "min_unit": "paragraph",
+                "initial_paragraphs_per_batch": 8,
+                "min_paragraphs_per_batch": 1,
+                "overflow_backoff_factor": 0.5
             },
             "translation": {
                 "skip_existing_done_chapters": true,
@@ -539,18 +473,8 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
                 .entry("top_p".to_string())
                 .or_insert_with(|| serde_json::json!(0.85));
 
-            lm_obj.insert(
-                "max_output_tokens".to_string(),
-                serde_json::json!(paths.lm_studio_max_output_tokens),
-            );
-            lm_obj.insert(
-                "request_timeout_seconds".to_string(),
-                serde_json::json!(paths.lm_studio_request_timeout_seconds),
-            );
-            lm_obj.insert(
-                "max_retries".to_string(),
-                serde_json::json!(paths.lm_studio_max_retries),
-            );
+            lm_obj.remove(&format!("max_{}", "output_tokens"));
+
             lm_obj
                 .entry("retry_sleep_seconds".to_string())
                 .or_insert_with(|| serde_json::json!(5));
@@ -559,36 +483,27 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
         {
             let chunk_obj = ensure_json_object(obj, "chunking");
 
-            chunk_obj.insert(
-                "context_tokens".to_string(),
-                serde_json::json!(paths.chunking_context_tokens),
-            );
+            chunk_obj.remove("context_tokens");
+            chunk_obj.remove("reserved_prompt_tokens");
+            chunk_obj.remove("reserved_output_tokens");
+            chunk_obj.remove("safety_ratio");
+            chunk_obj.remove("english_chars_per_token");
+            chunk_obj.remove("cjk_chars_per_token");
+            chunk_obj.remove("split_mode");
+            chunk_obj.remove("allow_word_split");
+
             chunk_obj
-                .entry("reserved_prompt_tokens".to_string())
-                .or_insert_with(|| serde_json::json!(1800));
-            chunk_obj.insert(
-                "reserved_output_tokens".to_string(),
-                serde_json::json!(paths.chunking_reserved_output_tokens),
-            );
-            chunk_obj.insert(
-                "safety_ratio".to_string(),
-                serde_json::json!(paths.chunking_safety_ratio),
-            );
+                .entry("min_unit".to_string())
+                .or_insert_with(|| serde_json::Value::String("paragraph".to_string()));
             chunk_obj
-                .entry("english_chars_per_token".to_string())
-                .or_insert_with(|| serde_json::json!(4.0));
+                .entry("initial_paragraphs_per_batch".to_string())
+                .or_insert_with(|| serde_json::json!(8));
             chunk_obj
-                .entry("cjk_chars_per_token".to_string())
-                .or_insert_with(|| serde_json::json!(1.2));
+                .entry("min_paragraphs_per_batch".to_string())
+                .or_insert_with(|| serde_json::json!(1));
             chunk_obj
-                .entry("split_mode".to_string())
-                .or_insert_with(|| {
-                    serde_json::Value::String("paragraph_sentence_word".to_string())
-                });
-            chunk_obj.insert(
-                "allow_word_split".to_string(),
-                serde_json::json!(paths.chunking_allow_word_split),
-            );
+                .entry("overflow_backoff_factor".to_string())
+                .or_insert_with(|| serde_json::json!(0.5));
         }
     }
 
@@ -993,19 +908,10 @@ mod tests {
             "enChaptersDir": "data/en_chapters",
             "cnChaptersDir": "data/cn_chapters",
             "manifestFile": "data/manifests/translation_manifest.json",
-            "lmStudioBaseUrl": "http://localhost:1234/v1",
-            "lmStudioMaxOutputTokens": 2048,
-            "lmStudioRequestTimeoutSeconds": 900,
-            "lmStudioMaxRetries": 1,
-            "chunkingContextTokens": 8192,
-            "chunkingReservedOutputTokens": 2048,
-            "chunkingSafetyRatio": 0.65,
-            "chunkingAllowWordSplit": false
+            "lmStudioBaseUrl": "http://localhost:1234/v1"
         }"#;
         let paths: UiPaths = serde_json::from_str(json).unwrap();
         assert_eq!(paths.lm_studio_base_url, "http://localhost:1234/v1");
-        assert_eq!(paths.lm_studio_max_output_tokens, 2048);
-        assert_eq!(paths.chunking_context_tokens, 8192);
     }
 
     #[test]

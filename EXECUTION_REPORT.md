@@ -127,3 +127,54 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - Remote main HEAD: 02fbdccc0c62ed97e4e05799faa77d94290ba314
 - Match: YES
 - Force push used: NO
+
+## Second-pass Translation Fix
+
+### Removed Wrong Token UI
+
+- Removed chunkingContextTokens from UiSettings: PASS
+- Removed chunkingReservedOutputTokens from UiSettings: PASS
+- Removed chunkingSafetyRatio from UiSettings: PASS
+- Removed chunkingAllowWordSplit from UiSettings: PASS
+- Removed lmStudioMaxOutputTokens from UiSettings: PASS
+- Removed translation parameter section from PathSettingsPanel: PASS
+
+### Removed Program-owned Context Budget
+
+- Removed context_tokens from ChunkingConfig: PASS
+- Removed reserved_output_tokens from ChunkingConfig: PASS
+- Removed safety_ratio from ChunkingConfig: PASS
+- Removed estimate_tokens / calculate_chunk_budget: PASS
+- Removed sentence/word fallback splitting: PASS
+- Removed allow_word_split path: PASS
+
+### Paragraph Batch Translation
+
+- Added split_paragraph_blocks (retained): PASS
+- Added build_paragraph_batches: PASS
+- Translator logs Paragraph batch: PASS
+- Translator reduces paragraph batch size on ContextOverflowError: PASS
+- Single paragraph overflow fails without splitting: PASS
+- test_translation_pipeline overflow backoff + single-paragraph fail tests (hard constraint Q): PASS
+
+### LM Studio Parameter Handling
+
+- Removed max_output_tokens from LMStudioConfig entirely: PASS
+- translate() omits max_tokens unless caller passes explicit max_tokens arg: PASS
+- translator never passes max_tokens: PASS
+- Rust writeConfig removes stale lmstudio max output key: PASS
+- Rust writeConfig removes stale old chunking token fields: PASS
+- diagnostics.check_lmstudio filters legacy lmstudio dict (hard constraint R): PASS
+
+### Verification
+
+- pytest -q: PASS (36 passed)
+- npm run build: PASS
+- cargo check: PASS (via dev_check.bat + MSVC env)
+- cargo test: PASS (4 passed)
+- dev_check.bat: PASS
+- translate --max-chapters 1: NOT RUN (requires LM Studio live session)
+- UI no token parameter fields: PASS (build + code review)
+- git grep max_output_tokens production paths empty: PASS
+- git grep max_output_tokens tests only test_config.py: PASS
+- git grep translator.py no max_tokens: PASS
