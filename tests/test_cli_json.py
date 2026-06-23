@@ -138,3 +138,22 @@ def test_translate_max_chapters_arg_parsed():
 
     args_default = parser.parse_args(["--config", "dummy.json", "translate"])
     assert args_default.max_chapters == 0
+
+
+def test_translate_chapter_index_arg_parsed():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config")
+    subparsers = parser.add_subparsers(dest="command")
+    translate_parser = subparsers.add_parser("translate")
+    translate_parser.add_argument("--max-chapters", type=int, default=0)
+    translate_parser.add_argument("--chapter-index", type=int, default=0)
+
+    args = parser.parse_args([
+        "--config", "dummy.json",
+        "translate",
+        "--chapter-index", "4",
+    ])
+    assert args.command == "translate"
+    assert args.chapter_index == 4

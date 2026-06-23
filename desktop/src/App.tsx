@@ -49,6 +49,7 @@ export default function App() {
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
+  const commandRunningRef = useRef(false);
   const toast = useToast();
 
   // ---- Merge config into settings (plain function, no hook deps) ----
@@ -280,6 +281,24 @@ export default function App() {
     return true;
   }, [settings.repoRoot, appendLog, toast]);
 
+  const runExclusive = useCallback(
+    async <T,>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+      if (commandRunningRef.current) {
+        appendLog("stderr", `已有任务正在运行，忽略重复操作: ${label}`);
+        toast.show("已有任务正在运行", "error");
+        return null;
+      }
+
+      commandRunningRef.current = true;
+      try {
+        return await fn();
+      } finally {
+        commandRunningRef.current = false;
+      }
+    },
+    [appendLog, toast],
+  );
+
   const updateSettings = useCallback((next: UiSettings) => {
     setSettings(next);
     setHealth(null);
@@ -386,167 +405,223 @@ export default function App() {
   const runSplit = useCallback(async () => {
     if (!validateRepoRoot()) return;
 
-    setTaskState("splitting");
-    clearLogs();
-    appendLog("system", "保存配置...");
-    try {
-      await writeConfig(settings);
-    } catch (err) {
-      appendLog("stderr", `保存配置失败: ${err}`);
-      setTaskState("error");
-      return;
-    }
-
-    appendLog("system", "开始分章节...");
-    try {
-      const result = await runPythonCli({
-        repoRoot: settings.repoRoot,
-        pythonCommand: settings.pythonCommand,
-        cliCommand: "split",
-        configPath: settings.configPath,
-        jsonOutput: true,
-      });
-      setLastCommand(result.commandLine);
-      if (result.logFilePath) {
-        setLogFilePath(result.logFilePath);
-      }
-
-      if (result.code !== 0) {
-        appendLog("stderr", result.stderr || "分章节失败");
-        toast.show("分章节失败", "error");
+    await runExclusive("split", async () => {
+      setTaskState("splitting");
+      clearLogs();
+      appendLog("system", "保存配置...");
+      try {
+        await writeConfig(settings);
+      } catch (err) {
+        appendLog("stderr", `保存配置失败: ${err}`);
         setTaskState("error");
         return;
       }
 
-      const payload = parseSplitJson(result.stdout);
-      appendLog(
-        "system",
-        `分章节完成: ${payload.chapters} 章 -> ${payload.en_chapters_dir}`,
-      );
+      appendLog("system", "开始分章节...");
+      try {
+        const result = await runPythonCli({
+          repoRoot: settings.repoRoot,
+          pythonCommand: settings.pythonCommand,
+          cliCommand: "split",
+          configPath: settings.configPath,
+          jsonOutput: true,
+        });
+        setLastCommand(result.commandLine);
+        if (result.logFilePath) {
+          setLogFilePath(result.logFilePath);
+        }
 
-      if (payload.cwd) {
-        appendLog("system", `split cwd: ${payload.cwd}`);
+        if (result.code !== 0) {
+          appendLog("stderr", result.stderr || "分章节失败");
+          toast.show("分章节失败", "error");
+          setTaskState("error");
+          return;
+        }
+
+        const payload = parseSplitJson(result.stdout);
+        appendLog(
+          "system",
+          `分章节完成: ${payload.chapters} 章 -> ${payload.en_chapters_dir}`,
+        );
+
+        if (payload.cwd) {
+          appendLog("system", `split cwd: ${payload.cwd}`);
+        }
+
+        appendLog(
+          "system",
+          `split manifest: ${payload.manifest_file_absolute ?? payload.manifest_file}`,
+        );
+
+        if (payload.en_chapters_dir_absolute) {
+          appendLog("system", `split en dir: ${payload.en_chapters_dir_absolute}`);
+        }
+
+        toast.show(`分章节完成: ${payload.chapters} 章`, "success");
+
+        await refreshStatus();
+      } catch (err) {
+        appendLog("stderr", `分章节失败: ${err}`);
+        toast.show(`分章节失败: ${err}`, "error");
+        setTaskState("error");
+        return;
       }
-
-      appendLog(
-        "system",
-        `split manifest: ${payload.manifest_file_absolute ?? payload.manifest_file}`,
-      );
-
-      if (payload.en_chapters_dir_absolute) {
-        appendLog("system", `split en dir: ${payload.en_chapters_dir_absolute}`);
-      }
-
-      toast.show(`分章节完成: ${payload.chapters} 章`, "success");
-
-      await refreshStatus();
-    } catch (err) {
-      appendLog("stderr", `分章节失败: ${err}`);
-      toast.show(`分章节失败: ${err}`, "error");
-      setTaskState("error");
-      return;
-    }
-    setTaskState("idle");
-  }, [settings, clearLogs, appendLog, refreshStatus, toast, validateRepoRoot]);
+      setTaskState("idle");
+    });
+  }, [settings, clearLogs, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive]);
 
   const runTranslate = useCallback(async () => {
     if (!validateRepoRoot()) return;
 
-    setTaskState("translating");
-    appendLog("system", "保存配置...");
-    try {
-      await writeConfig(settings);
-    } catch (err) {
-      appendLog("stderr", `保存配置失败: ${err}`);
-      setTaskState("error");
-      return;
-    }
-
-    appendLog("system", "开始翻译...");
-    try {
-      const result = await runPythonCli({
-        repoRoot: settings.repoRoot,
-        pythonCommand: settings.pythonCommand,
-        cliCommand: "translate",
-        configPath: settings.configPath,
-        jsonOutput: false,
-      });
-      setLastCommand(result.commandLine);
-      if (result.logFilePath) {
-        setLogFilePath(result.logFilePath);
-      }
-
-      // Extract model from stdout if not already captured
-      if (!currentModel) {
-        const modelMatch = result.stdout.match(/Using LM Studio model:\s*(.+)/);
-        if (modelMatch) {
-          setCurrentModel(modelMatch[1].trim());
-        }
-      }
-
-      await refreshStatus();
-
-      if (result.code !== 0) {
-        toast.show("翻译过程中出现错误", "error");
+    await runExclusive("translate all", async () => {
+      setTaskState("translating");
+      appendLog("system", "保存配置...");
+      try {
+        await writeConfig(settings);
+      } catch (err) {
+        appendLog("stderr", `保存配置失败: ${err}`);
         setTaskState("error");
         return;
       }
 
-      toast.show("翻译完成!", "success");
-    } catch (err) {
-      appendLog("stderr", `翻译失败: ${err}`);
-      toast.show(`翻译失败: ${err}`, "error");
-      setTaskState("error");
-      return;
-    }
-    setTaskState("idle");
-  }, [settings, appendLog, refreshStatus, currentModel, toast, validateRepoRoot]);
+      appendLog("system", "连续翻译待处理章节...");
+      try {
+        const result = await runPythonCli({
+          repoRoot: settings.repoRoot,
+          pythonCommand: settings.pythonCommand,
+          cliCommand: "translate",
+          configPath: settings.configPath,
+          jsonOutput: false,
+        });
+        setLastCommand(result.commandLine);
+        if (result.logFilePath) {
+          setLogFilePath(result.logFilePath);
+        }
+
+        if (!currentModel) {
+          const modelMatch = result.stdout.match(/Using LM Studio model:\s*(.+)/);
+          if (modelMatch) {
+            setCurrentModel(modelMatch[1].trim());
+          }
+        }
+
+        await refreshStatus();
+
+        if (result.code !== 0) {
+          toast.show("翻译过程中出现错误", "error");
+          setTaskState("error");
+          return;
+        }
+
+        toast.show("翻译完成!", "success");
+      } catch (err) {
+        appendLog("stderr", `翻译失败: ${err}`);
+        toast.show(`翻译失败: ${err}`, "error");
+        setTaskState("error");
+        return;
+      }
+      setTaskState("idle");
+    });
+  }, [settings, appendLog, refreshStatus, currentModel, toast, validateRepoRoot, runExclusive]);
 
   const runTranslateNext = useCallback(async () => {
     if (!validateRepoRoot()) return;
 
-    setTaskState("translating");
-    appendLog("system", "保存配置...");
-    try {
-      await writeConfig(settings);
-    } catch (err) {
-      appendLog("stderr", `保存配置失败: ${err}`);
-      setTaskState("error");
-      return;
-    }
-
-    appendLog("system", "翻译下一章...");
-    try {
-      const result = await runPythonCli({
-        repoRoot: settings.repoRoot,
-        pythonCommand: settings.pythonCommand,
-        cliCommand: "translate",
-        configPath: settings.configPath,
-        jsonOutput: false,
-        maxChapters: 1,
-      });
-      setLastCommand(result.commandLine);
-      if (result.logFilePath) {
-        setLogFilePath(result.logFilePath);
-      }
-
-      await refreshStatus();
-
-      if (result.code !== 0) {
-        toast.show("翻译下一章失败", "error");
+    await runExclusive("translate next", async () => {
+      setTaskState("translating");
+      appendLog("system", "保存配置...");
+      try {
+        await writeConfig(settings);
+      } catch (err) {
+        appendLog("stderr", `保存配置失败: ${err}`);
         setTaskState("error");
         return;
       }
 
-      toast.show("下一章翻译完成!", "success");
-    } catch (err) {
-      appendLog("stderr", `翻译下一章失败: ${err}`);
-      toast.show(`翻译失败: ${err}`, "error");
-      setTaskState("error");
-      return;
-    }
-    setTaskState("idle");
-  }, [settings, appendLog, refreshStatus, toast, validateRepoRoot]);
+      appendLog("system", "翻译下一个待处理章节...");
+      try {
+        const result = await runPythonCli({
+          repoRoot: settings.repoRoot,
+          pythonCommand: settings.pythonCommand,
+          cliCommand: "translate",
+          configPath: settings.configPath,
+          jsonOutput: false,
+          maxChapters: 1,
+        });
+        setLastCommand(result.commandLine);
+        if (result.logFilePath) {
+          setLogFilePath(result.logFilePath);
+        }
+
+        await refreshStatus();
+
+        if (result.code !== 0) {
+          toast.show("翻译下一个待处理章节失败", "error");
+          setTaskState("error");
+          return;
+        }
+
+        toast.show("下一个待处理章节翻译完成", "success");
+      } catch (err) {
+        appendLog("stderr", `翻译下一个待处理章节失败: ${err}`);
+        toast.show(`翻译失败: ${err}`, "error");
+        setTaskState("error");
+        return;
+      }
+      setTaskState("idle");
+    });
+  }, [settings, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive]);
+
+  const runTranslateChapter = useCallback(
+    async (chapterIndex: number) => {
+      if (!validateRepoRoot()) return;
+
+      await runExclusive(`translate chapter ${chapterIndex}`, async () => {
+        setTaskState("translating");
+        appendLog("system", "保存配置...");
+        try {
+          await writeConfig(settings);
+        } catch (err) {
+          appendLog("stderr", `保存配置失败: ${err}`);
+          setTaskState("error");
+          return;
+        }
+
+        appendLog("system", `翻译指定章节: 第 ${chapterIndex} 章...`);
+        try {
+          const result = await runPythonCli({
+            repoRoot: settings.repoRoot,
+            pythonCommand: settings.pythonCommand,
+            cliCommand: "translate",
+            configPath: settings.configPath,
+            jsonOutput: false,
+            chapterIndex,
+          });
+
+          setLastCommand(result.commandLine);
+          if (result.logFilePath) {
+            setLogFilePath(result.logFilePath);
+          }
+
+          await refreshStatus();
+
+          if (result.code !== 0) {
+            toast.show(`第 ${chapterIndex} 章翻译失败，已保留断点`, "error");
+            setTaskState("error");
+            return;
+          }
+
+          toast.show(`第 ${chapterIndex} 章翻译完成`, "success");
+          setTaskState("idle");
+        } catch (err) {
+          appendLog("stderr", `指定章节翻译失败: ${err}`);
+          toast.show(`指定章节翻译失败: ${err}`, "error");
+          setTaskState("error");
+        }
+      });
+    },
+    [settings, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive],
+  );
 
   const stopTask = useCallback(async () => {
     appendLog("system", "正在停止当前任务...");
@@ -648,7 +723,15 @@ export default function App() {
               <CardTitle className="text-sm">章节列表</CardTitle>
             </CardHeader>
             <CardContent className="p-3 flex-1 overflow-auto">
-              <ChapterTable chapters={status?.chapters ?? []} />
+              <ChapterTable
+                chapters={status?.chapters ?? []}
+                onTranslateChapter={runTranslateChapter}
+                disabled={
+                  taskState === "translating" ||
+                  taskState === "splitting" ||
+                  taskState === "refreshing"
+                }
+              />
             </CardContent>
           </Card>
 

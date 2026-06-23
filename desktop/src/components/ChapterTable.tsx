@@ -7,10 +7,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { ChapterRow } from "@/types/app";
 
 interface ChapterTableProps {
   chapters: ChapterRow[];
+  onTranslateChapter?: (chapterIndex: number) => void;
+  disabled?: boolean;
 }
 
 const STATUS_MAP: Record<
@@ -23,7 +26,11 @@ const STATUS_MAP: Record<
   failed: { label: "失败", variant: "destructive" },
 };
 
-export function ChapterTable({ chapters }: ChapterTableProps) {
+export function ChapterTable({
+  chapters,
+  onTranslateChapter,
+  disabled = false,
+}: ChapterTableProps) {
   if (chapters.length === 0) {
     return (
       <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
@@ -40,9 +47,11 @@ export function ChapterTable({ chapters }: ChapterTableProps) {
             <TableHead className="w-12">章节</TableHead>
             <TableHead>标题</TableHead>
             <TableHead className="w-20">状态</TableHead>
+            <TableHead className="w-28">进度</TableHead>
             <TableHead className="w-24">英文文件</TableHead>
             <TableHead className="w-24">中文文件</TableHead>
             <TableHead className="w-14 text-right">Chunk</TableHead>
+            <TableHead className="w-24">操作</TableHead>
             <TableHead className="hidden md:table-cell">模型</TableHead>
             <TableHead className="hidden lg:table-cell">错误</TableHead>
           </TableRow>
@@ -50,6 +59,15 @@ export function ChapterTable({ chapters }: ChapterTableProps) {
         <TableBody>
           {chapters.map((ch) => {
             const info = STATUS_MAP[ch.translation_status] ?? STATUS_MAP.pending;
+            const progressLabel =
+              ch.source_paragraph_count && ch.source_paragraph_count > 0
+                ? `${ch.translated_paragraph_count ?? 0}/${ch.source_paragraph_count}`
+                : "-";
+            const canTranslateThis =
+              ch.translation_status === "pending" ||
+              ch.translation_status === "failed" ||
+              ch.translation_status === "in_progress";
+
             return (
               <TableRow key={ch.index}>
                 <TableCell className="font-mono text-xs">
@@ -66,6 +84,9 @@ export function ChapterTable({ chapters }: ChapterTableProps) {
                     {info.label}
                   </Badge>
                 </TableCell>
+                <TableCell className="text-xs">
+                  {progressLabel}
+                </TableCell>
                 <TableCell
                   className="max-w-[100px] truncate text-xs"
                   title={ch.en_path}
@@ -80,6 +101,30 @@ export function ChapterTable({ chapters }: ChapterTableProps) {
                 </TableCell>
                 <TableCell className="text-right text-xs">
                   {ch.chunk_count ?? "-"}
+                </TableCell>
+                <TableCell>
+                  {ch.translation_status === "done" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[10px]"
+                      disabled
+                    >
+                      已完成
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-[10px]"
+                      disabled={disabled || !canTranslateThis}
+                      onClick={() => onTranslateChapter?.(ch.index)}
+                    >
+                      {ch.translation_status === "in_progress"
+                        ? "继续此章"
+                        : "翻译此章"}
+                    </Button>
+                  )}
                 </TableCell>
                 <TableCell className="hidden md:table-cell max-w-[100px] truncate text-xs">
                   {ch.translation_model || "-"}

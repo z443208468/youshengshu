@@ -61,6 +61,11 @@ export interface ChapterRow {
   translation_model: string | null;
   chunk_count: number | null;
   error: string | null;
+  source_paragraph_count: number | null;
+  translated_paragraph_count: number | null;
+  translated_batch_count: number | null;
+  partial_path: string | null;
+  resume_state_path: string | null;
 }
 
 export interface StatusPayload {

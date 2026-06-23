@@ -64,6 +64,7 @@ export async function runPythonCli(params: {
   configPath: string;
   jsonOutput: boolean;
   maxChapters?: number;
+  chapterIndex?: number;
 }): Promise<ProcessOutput> {
   return invoke<ProcessOutput>("run_python_cli", {
     repoRoot: params.repoRoot,
@@ -72,6 +73,7 @@ export async function runPythonCli(params: {
     configPath: params.configPath,
     jsonOutput: params.jsonOutput,
     maxChapters: params.maxChapters ?? null,
+    chapterIndex: params.chapterIndex ?? null,
   });
 }
 

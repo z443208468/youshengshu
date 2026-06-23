@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tokio::io::AsyncBufReadExt;
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -58,8 +58,18 @@ struct LogPayload {
     line: String,
 }
 
-/// Holds an optional reference to a running child process so we can kill it.
-struct ActiveProcess(Mutex<Option<Child>>);
+/// Holds task lifecycle so concurrent starts cannot race between check and spawn.
+enum ActiveTask {
+    Starting,
+    Running(tokio::process::Child),
+}
+
+struct ActiveProcess(Mutex<Option<ActiveTask>>);
+
+fn clear_active_task(state: &tauri::State<'_, ActiveProcess>) {
+    let mut guard = state.0.lock().unwrap();
+    *guard = None;
+}
 
 /// Persists UI log lines (config save, errors, etc.) for the app session.
 struct UiSessionLog(Mutex<Option<std::fs::File>>);
@@ -548,6 +558,7 @@ fn build_python_cli_command(
     config_path: &str,
     json_output: bool,
     max_chapters: Option<u32>,
+    chapter_index: Option<u32>,
 ) -> Result<CommandSpec, String> {
     let repo_root_path = std::path::PathBuf::from(repo_root);
     let cli_path = repo_root_path.join("src").join("youshengshu").join("cli.py");
@@ -577,6 +588,13 @@ fn build_python_cli_command(
                 args.push(mc.to_string());
             }
         }
+
+        if let Some(idx) = chapter_index {
+            if idx > 0 {
+                args.push("--chapter-index".to_string());
+                args.push(idx.to_string());
+            }
+        }
     }
 
     let src_dir = repo_root_path.join("src");
@@ -604,6 +622,7 @@ async fn run_python_cli(
     config_path: String,
     json_output: bool,
     max_chapters: Option<u32>,
+    chapter_index: Option<u32>,
     state: tauri::State<'_, ActiveProcess>,
 ) -> Result<ProcessOutput, String> {
     // Validate command
@@ -620,29 +639,43 @@ async fn run_python_cli(
         return Err("配置文件路径为空，请设置 config/default_config.json 或选择配置文件路径".to_string());
     }
 
-    // Concurrency check
+    // Concurrency check — reserve slot before spawn
     {
-        let guard = state.0.lock().unwrap();
+        let mut guard = state.0.lock().unwrap();
         if guard.is_some() {
             return Err("已有任务正在运行，请先停止或等待完成。".to_string());
         }
+        *guard = Some(ActiveTask::Starting);
     }
 
     // Build command spec
-    let spec = build_python_cli_command(
+    let spec = match build_python_cli_command(
         &repo_root,
         &python_command,
         &cli_command,
         &config_path,
         json_output,
         max_chapters,
-    )?;
+        chapter_index,
+    ) {
+        Ok(spec) => spec,
+        Err(e) => {
+            clear_active_task(&state);
+            return Err(e);
+        }
+    };
 
     let started_at = iso_now();
 
     // Open log file
     let repo_root_path = std::path::PathBuf::from(&repo_root);
-    let opened_log = open_log_file(&repo_root_path)?;
+    let opened_log = match open_log_file(&repo_root_path) {
+        Ok(opened) => opened,
+        Err(e) => {
+            clear_active_task(&state);
+            return Err(e);
+        }
+    };
     let log_file_path = opened_log.path.to_string_lossy().to_string();
     let log_file = std::sync::Arc::new(std::sync::Mutex::new(opened_log.file));
     write_log_line(&mut *log_file.lock().unwrap(), "system", &format!("Working directory: {}", repo_root));
@@ -724,7 +757,10 @@ async fn run_python_cli(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| format!("启动进程失败: {e}"))?;
+        .map_err(|e| {
+            clear_active_task(&state);
+            format!("启动进程失败: {e}")
+        })?;
 
     let stdout_handle = child
         .stdout
@@ -738,7 +774,7 @@ async fn run_python_cli(
     // Store the actual running child
     {
         let mut guard = state.0.lock().unwrap();
-        *guard = Some(child);
+        *guard = Some(ActiveTask::Running(child));
     }
 
     // Read stdout and stderr concurrently
@@ -788,7 +824,10 @@ async fn run_python_cli(
     // Take the child out of the mutex so we can wait without holding the lock
     let mut child_to_wait = {
         let mut guard = state.0.lock().unwrap();
-        guard.take()
+        match guard.take() {
+            Some(ActiveTask::Running(child)) => Some(child),
+            _ => None,
+        }
     };
     let status = if let Some(ref mut child) = child_to_wait {
         child.wait().await.unwrap_or_default()
@@ -831,7 +870,10 @@ async fn kill_python_process(
 ) -> Result<(), String> {
     let child_to_kill = {
         let mut guard = state.0.lock().unwrap();
-        guard.take()
+        match guard.take() {
+            Some(ActiveTask::Running(child)) => Some(child),
+            Some(ActiveTask::Starting) | None => None,
+        }
     };
     if let Some(mut child) = child_to_kill {
         child
@@ -949,6 +991,80 @@ mod tests {
         assert_eq!(actual, expected);
 
         std::env::remove_var("YSS_REPO_ROOT");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_python_cli_command_translate_with_chapter_index() {
+        let dir = std::env::temp_dir().join("yss_test_build_cmd");
+        let _ = std::fs::remove_dir_all(&dir);
+        let src_dir = dir.join("src").join("youshengshu");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("cli.py"), "# test").unwrap();
+
+        let spec = build_python_cli_command(
+            dir.to_str().unwrap(),
+            "python",
+            "translate",
+            "config/default_config.json",
+            false,
+            None,
+            Some(4),
+        )
+        .unwrap();
+
+        assert!(spec.args.contains(&"--chapter-index".to_string()));
+        assert!(spec.args.contains(&"4".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_python_cli_command_translate_with_max_and_chapter_index() {
+        let dir = std::env::temp_dir().join("yss_test_build_cmd2");
+        let _ = std::fs::remove_dir_all(&dir);
+        let src_dir = dir.join("src").join("youshengshu");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("cli.py"), "# test").unwrap();
+
+        let spec = build_python_cli_command(
+            dir.to_str().unwrap(),
+            "python",
+            "translate",
+            "config/default_config.json",
+            false,
+            Some(1),
+            Some(4),
+        )
+        .unwrap();
+
+        assert!(spec.args.contains(&"--max-chapters".to_string()));
+        assert!(spec.args.contains(&"--chapter-index".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_python_cli_command_split_omits_chapter_index() {
+        let dir = std::env::temp_dir().join("yss_test_build_cmd3");
+        let _ = std::fs::remove_dir_all(&dir);
+        let src_dir = dir.join("src").join("youshengshu");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("cli.py"), "# test").unwrap();
+
+        let spec = build_python_cli_command(
+            dir.to_str().unwrap(),
+            "python",
+            "split",
+            "config/default_config.json",
+            true,
+            None,
+            Some(4),
+        )
+        .unwrap();
+
+        assert!(!spec.args.iter().any(|a| a.contains("chapter-index")));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

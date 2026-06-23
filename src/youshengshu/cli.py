@@ -60,6 +60,7 @@ def cmd_split(config_path: str, as_json: bool = False) -> None:
     manifest = TranslationManifest.create_from_records(
         source_file=str(input_path),
         records=records,
+        cn_chapters_dir=config.paths.cn_chapters_dir,
     )
 
     manifest_path = Path(config.paths.manifest_file)
@@ -86,7 +87,11 @@ def cmd_split(config_path: str, as_json: bool = False) -> None:
     print(f"Manifest: {manifest_path}", file=sys.stderr)
 
 
-def cmd_translate(config_path: str, max_chapters: int = 0) -> None:
+def cmd_translate(
+    config_path: str,
+    max_chapters: int = 0,
+    chapter_index: int = 0,
+) -> None:
     config = load_config(config_path)
 
     manifest_path = Path(config.paths.manifest_file)
@@ -98,6 +103,14 @@ def cmd_translate(config_path: str, max_chapters: int = 0) -> None:
         sys.exit(1)
 
     manifest = TranslationManifest.load(manifest_path)
+
+    changed = manifest.normalize_cn_paths(config.paths.cn_chapters_dir)
+    if changed:
+        manifest.save(manifest_path)
+        print(
+            f"已修正 {len(changed)} 个章节的中文输出路径到 cn_chapters_dir。",
+            file=sys.stderr,
+        )
 
     # Check for stale chapters and save if any were reset
     reset_indices = manifest.check_and_reset_stale()
@@ -113,7 +126,13 @@ def cmd_translate(config_path: str, max_chapters: int = 0) -> None:
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(1)
 
-    results = run_translation_pipeline(config, client, manifest, max_chapters=max_chapters)
+    results = run_translation_pipeline(
+        config,
+        client,
+        manifest,
+        max_chapters=max_chapters,
+        chapter_index=chapter_index,
+    )
 
     if not results:
         summary = manifest.get_summary()
@@ -152,6 +171,14 @@ def cmd_status(config_path: str, as_json: bool = False) -> None:
         sys.exit(1)
 
     manifest = TranslationManifest.load(manifest_path)
+
+    changed = manifest.normalize_cn_paths(config.paths.cn_chapters_dir)
+    if changed:
+        manifest.save(manifest_path)
+        print(
+            f"已修正 {len(changed)} 个章节的中文输出路径到 cn_chapters_dir。",
+            file=sys.stderr,
+        )
 
     if as_json:
         payload = _build_status_json(manifest)
@@ -233,6 +260,12 @@ def main() -> None:
         default=0,
         help="最大翻译章节数 (0 表示全部)",
     )
+    translate_parser.add_argument(
+        "--chapter-index",
+        type=int,
+        default=0,
+        help="只翻译指定章节编号；0 表示按待处理顺序翻译",
+    )
 
     status_parser = subparsers.add_parser("status", help="查看当前翻译进度")
     status_parser.add_argument(
@@ -258,7 +291,11 @@ def main() -> None:
         if args.command == "split":
             cmd_split(args.config, as_json=getattr(args, "json_output", False))
         elif args.command == "translate":
-            cmd_translate(args.config, max_chapters=getattr(args, "max_chapters", 0))
+            cmd_translate(
+                args.config,
+                max_chapters=getattr(args, "max_chapters", 0),
+                chapter_index=getattr(args, "chapter_index", 0),
+            )
         elif args.command == "status":
             cmd_status(args.config, as_json=getattr(args, "json_output", False))
         elif args.command == "doctor":

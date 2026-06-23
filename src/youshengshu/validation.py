@@ -1,4 +1,3 @@
-import re
 import warnings
 
 from .exceptions import TranslationValidationError
@@ -15,17 +14,6 @@ KNOWN_PREAMBLES = [
     "以下是译文：",
 ]
 
-REFUSAL_PATTERNS = [
-    "我不能",
-    "无法完成",
-    "不能提供",
-    "我无法",
-    "我不可以",
-    "抱歉，我无法",
-    "对不起，我无法",
-    "很抱歉，我无法",
-]
-
 
 def strip_known_preambles(text: str) -> str:
     """Remove common preambles that some models add before translations."""
@@ -38,19 +26,14 @@ def strip_known_preambles(text: str) -> str:
 
 
 def validate_translation_chunk(source: str, translated: str) -> None:
-    """Validate a translated chunk. Raise TranslationValidationError on failure."""
+    """Validate a translated chunk. Raise TranslationValidationError only for structurally unusable output."""
 
     stripped = translated.strip()
     if not stripped:
         raise TranslationValidationError("译文为空。")
 
-    for pattern in REFUSAL_PATTERNS:
-        if pattern in stripped:
-            raise TranslationValidationError(
-                f"模型可能拒绝了翻译（包含 '{pattern}'）。"
-            )
-
-    # Check first 200 chars for low Chinese ratio
+    # Check first 200 chars for low Chinese ratio.
+    # This remains a warning only; it must not fail the chapter.
     head = stripped[:200]
     if head:
         non_space_chars = [c for c in head if not c.isspace()]
@@ -66,5 +49,5 @@ def validate_translation_chunk(source: str, translated: str) -> None:
 def validate_translation_result(translated: str) -> str:
     """Strip preamble, validate, return cleaned result."""
     cleaned = strip_known_preambles(translated)
-    validate_translation_chunk("", cleaned)  # source not needed for basic checks
+    validate_translation_chunk("", cleaned)
     return cleaned

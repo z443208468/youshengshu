@@ -178,3 +178,88 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - git grep max_output_tokens production paths empty: PASS
 - git grep max_output_tokens tests only test_config.py: PASS
 - git grep translator.py no max_tokens: PASS
+
+## Third-pass Translation Control Fix
+
+### Output Path
+
+- Manifest create_from_records uses cn_chapters_dir: PASS
+- Legacy cn_path migration implemented: PASS (`normalize_cn_paths`)
+- en_chapters_dir no longer receives *_cn.txt: PASS (path helpers + tests)
+- Existing wrong cn files moved when safe: PASS (`test_normalize_cn_paths_moves_legacy_cn_file`)
+
+### Resume State
+
+- Added resume_state.py: PASS
+- Added TranslationResumeState schema version 1: PASS
+- Resume JSON is source of truth: PASS
+- Partial txt is regenerated from resume state: PASS
+- Each successful batch saves resume + partial + manifest: PASS
+- Restart resumes from source paragraph cursor: PASS (`test_resume_after_failed_batch`)
+- Source hash mismatch invalidates resume: PASS (`test_validate_resume_state_rejects_source_hash_mismatch`)
+
+### Manifest Fields
+
+- translated_paragraph_count: PASS
+- source_paragraph_count: PASS
+- translated_batch_count: PASS
+- partial_path: PASS
+- resume_state_path: PASS
+
+### Chapter Selection
+
+- CLI --chapter-index: PASS
+- Tauri chapterIndex: PASS
+- Frontend runTranslateChapter: PASS
+- ChapterTable row action: PASS
+- “下一章” wording clarified: PASS
+
+### Failure Behavior
+
+- Pipeline stops on first failed chapter: PASS (`test_pipeline_stops_after_first_failed_chapter`)
+- CLI returns nonzero on chapter failure: PASS (`TranslationPipelineStoppedError` → `YoushengshuError` → exit 1)
+- Later chapters remain pending: PASS
+- UI shows failure and preserved resume progress: PASS (code review)
+
+### Concurrency
+
+- Tauri ActiveTask Starting/Running lock: PASS
+- Frontend commandRunningRef guard: PASS
+
+### Remove Refusal-Text Failure Mechanism
+
+#### Removed
+
+- Removed REFUSAL_PATTERNS from validation.py: PASS
+- Removed full-text refusal phrase matching: PASS
+- Removed failure on refusal-like translated text: PASS
+
+#### Kept
+
+- Empty translation still fails: PASS
+- Low Chinese ratio remains warning only: PASS
+- LM Studio request errors still fail: PASS
+- ContextOverflowError still handled by paragraph batch backoff: PASS
+- done status clears previous error: PASS (`test_done_status_clears_previous_error`)
+
+#### Tests
+
+- test_validation_allows_i_cannot_and_i_am_unable_phrases: PASS
+- test_validation_does_not_fail_on_refusal_like_text: PASS
+- test_validation_rejects_empty_translation: PASS
+- test_validation_warns_but_does_not_fail_on_low_chinese_ratio: PASS
+- test_done_status_clears_previous_error: PASS
+- validation.py TranslationValidationError only for empty translation (manual grep review): PASS
+
+### Verification
+
+- pytest -q: PASS (55 passed)
+- npm run build: PASS
+- cargo check: PASS (via dev_check + MSVC env)
+- cargo test: PASS (7 passed)
+- dev_check.bat: PASS
+- CLI --chapter-index 4: NOT RUN (requires LM Studio live session)
+- Resume after failed batch: PASS (unit test)
+- cn output path correct: PASS
+- en dir pollution check: NOT RUN (manual)
+- LOCAL_HEAD == REMOTE_HEAD: PENDING (after push)

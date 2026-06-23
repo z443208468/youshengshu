@@ -93,7 +93,11 @@ export function ActionPanel({
         size="sm"
         className="w-full justify-start text-xs"
         disabled={isRunning || !canTranslate}
-        title={!canTranslate ? "翻译条件未就绪：需要输入 TXT 正常且 LM Studio 已加载模型" : undefined}
+        title={
+          !canTranslate
+            ? "翻译条件未就绪：需要输入 TXT 正常且 LM Studio 已加载模型"
+            : "连续翻译遇到任一章节失败会停止，并保留该章断点。"
+        }
         onClick={onTranslate}
       >
         {taskState === "translating" ? (
@@ -101,7 +105,7 @@ export function ActionPanel({
         ) : (
           <Play className="mr-2 h-3.5 w-3.5" />
         )}
-        开始翻译
+        连续翻译待处理章节
       </Button>
 
       <Button
@@ -113,7 +117,7 @@ export function ActionPanel({
         onClick={onTranslateNext}
       >
         <StepForward className="mr-2 h-3.5 w-3.5" />
-        只翻译下一章
+        翻译下一个待处理章节
       </Button>
 
       {showStopButton && (

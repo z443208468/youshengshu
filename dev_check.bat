@@ -93,6 +93,55 @@ exit /b 1
 
 :smoke_ok
 
+echo [CHECK] Positive grep — translation control features
+git grep "chapterIndex" -- desktop/src >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] chapterIndex not found in desktop/src
+  exit /b 1
+)
+
+git grep -e "--chapter-index" -- src/youshengshu desktop/src-tauri >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] --chapter-index not found in src/youshengshu or desktop/src-tauri
+  exit /b 1
+)
+
+git grep "translated_paragraph_count" -- src/youshengshu tests desktop/src >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] translated_paragraph_count not found
+  exit /b 1
+)
+
+git grep "resume_state_path" -- src/youshengshu tests desktop/src >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] resume_state_path not found
+  exit /b 1
+)
+
+echo [CHECK] Negative grep — forbidden patterns must not exist in src/youshengshu
+git grep "REFUSAL_PATTERNS" -- src/youshengshu >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] REFUSAL_PATTERNS must not exist in src/youshengshu
+  git grep "REFUSAL_PATTERNS" -- src/youshengshu
+  exit /b 1
+)
+git grep "en_path.replace" -- src/youshengshu >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] en_path.replace fallback must not exist in src/youshengshu
+  git grep "en_path.replace" -- src/youshengshu
+  exit /b 1
+)
+call :assert_no_grep "我无法" "src/youshengshu"
+if errorlevel 1 exit /b 1
+call :assert_no_grep "我不能" "src/youshengshu"
+if errorlevel 1 exit /b 1
+call :assert_no_grep "不能提供" "src/youshengshu"
+if errorlevel 1 exit /b 1
+call :assert_no_grep "作为AI" "src/youshengshu"
+if errorlevel 1 exit /b 1
+call :assert_no_grep "作为 AI" "src/youshengshu"
+if errorlevel 1 exit /b 1
+
 echo [CHECK] Frontend build
 cd /d "%REPO_ROOT%desktop"
 npm run build
@@ -111,4 +160,13 @@ cargo test
 if errorlevel 1 exit /b 1
 
 echo [CHECK] OK
+exit /b 0
+
+:assert_no_grep
+git grep "%~1" -- %~2 >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] Forbidden pattern found: %~1 in %~2
+  git grep "%~1" -- %~2
+  exit /b 1
+)
 exit /b 0
