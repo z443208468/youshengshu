@@ -309,3 +309,72 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - manual cold start shows "连续翻译待处理章节": NOT RUN
 - manual cold start shows ChapterTable 操作列: NOT RUN
 - LOCAL_HEAD == REMOTE_HEAD: PASS (e6b3542)
+
+## Unified Audiobook Workbench
+
+### Workspace UI
+
+- Added ModuleHome with three module cards: PASS
+- Initial activeModule is home: PASS
+- Added ModuleNav / WorkspaceShell (button nav + aria-current): PASS
+- Translation UI remains in App.tsx inside flex h-full w-full container (no TranslationWorkbench): PASS
+- Added TTS workbench (§5A.8–5A.16): PASS
+- Added RVC placeholder (§5A.14): PASS
+
+### UI/UX Verification
+
+- ModuleHome exists and displays three module cards: PASS
+- Initial active module is home: PASS
+- ModuleNav uses button elements and aria-current: PASS
+- ModuleNav has active/disabled visual states: PASS
+- Translation page keeps left/right layout inside flex h-full w-full container: PASS
+- TTS page root is flex h-full w-full overflow-hidden: PASS
+- TTS left panel order is service/source/provider/action: PASS
+- TTS service card has unchecked/checking/connected/disconnected/error states: PASS
+- TTS disconnected CosyVoice state is visible in-page: PASS
+- TTS mode fields are conditional and instruct2 is absent: PASS
+- TTS table action column is rightmost: PASS
+- TTS row buttons include chapter number: PASS
+- RVC page root is h-full w-full and clearly states TTS != RVC: PASS
+- No new UI framework added: PASS
+- TTS log panel uses ttsLogs + pre: PASS
+- saveTtsConfigOnly and refreshTtsStatusOnly present: PASS
+- TtsWorkbench defines handlePickSource / handlePickOutputDir / handlePickPromptAudio / handleOpenAudioDir: PASS
+- TtsWorkbench imports @tauri-apps/plugin-dialog open: PASS
+- dev_check does not run synthesize and leaves synthesize to pytest fake provider: PASS
+- Plan contains no future-provider implementation instructions beyond CosyVoiceHttpProvider and FakeTtsProvider: PASS
+- text_segmenter.py defines all helper functions used by split_text_to_segments: PASS
+- chapter_sort_key is implemented, not left as comments: PASS
+- §10.1 no longer contains pseudo-code-only helper calls: PASS
+
+### TTS Backend
+
+- Added src/youshengshu_tts: PASS
+- Added TtsConfig with source_mode validation: PASS
+- Added TtsManifest: PASS
+- Added text segmenter: PASS
+- Added TTS pipeline: PASS
+- Added CosyVoice HTTP provider: PASS
+- Added FakeTtsProvider for tests: PASS
+- Added TTS CLI: PASS
+
+### TTS Provider
+
+- Selected CosyVoice HTTP as first provider: PASS
+- CosyVoice FastAPI returns raw int16 PCM; provider wraps with wave (22050 Hz mono): PASS
+- Supported modes: sft / zero_shot / cross_lingual / instruct (not instruct2): PASS
+- CosyVoice is cloned by script, not vendored: PASS
+- third_party/tts is gitignored: PASS
+- model files are not committed: PASS
+
+### Verification
+
+- python -m pytest -q: PASS (72 passed)
+- python -m youshengshu_tts.cli --help: PASS
+- TTS doctor smoke: PASS
+- TTS synthesize with fake provider: PASS (pytest)
+- npm run build: PASS
+- cargo check: PASS
+- cargo test: PASS (8 passed)
+- dev_check.bat: PASS
+- LOCAL_HEAD == REMOTE_HEAD: PENDING (commit/push below)

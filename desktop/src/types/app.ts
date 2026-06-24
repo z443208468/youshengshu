@@ -109,3 +109,80 @@ export interface ProcessOutput {
   finishedAt: string;
   logFilePath: string;
 }
+
+export type FeatureModule = "translation" | "tts" | "rvc";
+export type WorkspaceModule = "home" | FeatureModule;
+
+export interface ModuleCardInfo {
+  id: FeatureModule;
+  title: string;
+  subtitle: string;
+  statusLabel: string;
+  description: string;
+  primaryAction: string;
+}
+
+export type TtsTaskState =
+  | "idle"
+  | "saving_config"
+  | "checking_service"
+  | "creating_project"
+  | "refreshing"
+  | "synthesizing"
+  | "stopping"
+  | "error";
+
+export type TtsServiceStatus =
+  | "unchecked"
+  | "checking"
+  | "connected"
+  | "disconnected"
+  | "error";
+
+export type TtsChapterStatus =
+  | "pending"
+  | "segmented"
+  | "in_progress"
+  | "done"
+  | "failed";
+
+export interface TtsSettings {
+  repoRoot: string;
+  ttsConfigPath: string;
+  sourceMode: "txt_file" | "cn_chapters_dir";
+  sourcePath: string;
+  outputDir: string;
+  provider: "cosyvoice_http";
+  providerBaseUrl: string;
+  voiceMode: "sft" | "zero_shot" | "cross_lingual" | "instruct";
+  spkId: string;
+  promptText: string;
+  promptAudioPath: string;
+  instructText: string;
+}
+
+export interface TtsChapterRow {
+  index: number;
+  title: string;
+  source_path: string;
+  status: TtsChapterStatus;
+  segment_count: number;
+  done_segment_count: number;
+  failed_segment_count: number;
+  chapter_wav_path: string | null;
+  chapter_mp3_path: string | null;
+  error: string | null;
+}
+
+export interface TtsStatusPayload {
+  project_id: string;
+  source_mode: "txt_file" | "cn_chapters_dir";
+  source_path: string;
+  output_dir: string;
+  total: number;
+  done: number;
+  pending: number;
+  failed: number;
+  in_progress: number;
+  chapters: TtsChapterRow[];
+}

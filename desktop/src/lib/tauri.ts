@@ -81,6 +81,40 @@ export async function killPythonProcess(): Promise<void> {
   return invoke<void>("kill_python_process");
 }
 
+export async function writeJsonConfig(
+  repoRoot: string,
+  configPath: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  return invoke<void>("write_json_config", {
+    repoRoot,
+    configPath,
+    payload,
+  });
+}
+
+export async function runTtsCli(params: {
+  repoRoot: string;
+  pythonCommand: string;
+  cliCommand: string;
+  configPath: string;
+  jsonOutput: boolean;
+  chapterIndex?: number;
+}): Promise<ProcessOutput> {
+  return invoke<ProcessOutput>("run_tts_cli", {
+    repoRoot: params.repoRoot,
+    pythonCommand: params.pythonCommand,
+    cliCommand: params.cliCommand,
+    configPath: params.configPath,
+    jsonOutput: params.jsonOutput,
+    chapterIndex: params.chapterIndex ?? null,
+  });
+}
+
+export async function killTtsProcess(): Promise<void> {
+  return invoke<void>("kill_tts_process");
+}
+
 // ---- Event listeners ----
 
 export async function listenToLogs(

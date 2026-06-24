@@ -40,3 +40,10 @@ logs/
 # Dev check artifacts
 .doctor_check.json
 .tmp_dev_check/
+
+# third party local TTS/RVC engines
+third_party/tts/
+third_party/rvc/
+
+# audio project outputs
+data/audio_projects/

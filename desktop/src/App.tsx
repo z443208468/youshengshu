@@ -43,7 +43,13 @@ import type {
   DoctorPayload,
   AppContext,
   RuntimeMismatch,
+  WorkspaceModule,
+  FeatureModule,
 } from "@/types/app";
+import { WorkspaceShell } from "@/components/workspace/WorkspaceShell";
+import { ModuleHome } from "@/components/workspace/ModuleHome";
+import { TtsWorkbench } from "@/features/tts/TtsWorkbench";
+import { RvcWorkbench } from "@/features/rvc/RvcWorkbench";
 
 export default function App() {
   // Settings
@@ -57,6 +63,7 @@ export default function App() {
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
   const [runtimeContext, setRuntimeContext] = useState<AppContext | null>(null);
   const [runtimeMismatch, setRuntimeMismatch] = useState<RuntimeMismatch | null>(null);
+  const [activeModule, setActiveModule] = useState<WorkspaceModule>("home");
   const unlistenRef = useRef<(() => void) | null>(null);
   const commandRunningRef = useRef(false);
   const toast = useToast();
@@ -722,6 +729,10 @@ export default function App() {
     openDir(settings.cnChaptersDir);
   }, [settings, openDir]);
 
+  const handleSelectModule = (module: FeatureModule) => {
+    setActiveModule(module);
+  };
+
   // ---- Render ----
   return (
     <div className="flex h-screen flex-col">
@@ -733,7 +744,17 @@ export default function App() {
         mismatch={hasRuntimeMismatch}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <WorkspaceShell
+        activeModule={activeModule}
+        onChangeModule={setActiveModule}
+        runtimeBlocking={Boolean(runtimeMismatch)}
+      >
+        {activeModule === "home" && (
+          <ModuleHome onSelectModule={handleSelectModule} />
+        )}
+
+        {activeModule === "translation" && (
+          <div className="flex h-full w-full overflow-hidden">
         {/* Left panel: health + settings + actions + command preview */}
         <motion.aside
           className="w-[320px] shrink-0 border-r border-border p-4 flex flex-col gap-4 overflow-y-auto"
@@ -830,7 +851,21 @@ export default function App() {
             </CardContent>
           </Card>
         </motion.main>
-      </div>
+          </div>
+        )}
+
+        {activeModule === "tts" && (
+          <TtsWorkbench
+            runtimeMismatch={runtimeMismatch}
+            repoRoot={settings.repoRoot}
+            pythonCommand={settings.pythonCommand}
+          />
+        )}
+
+        {activeModule === "rvc" && (
+          <RvcWorkbench repoRoot={settings.repoRoot} />
+        )}
+      </WorkspaceShell>
 
       <Toast
         message={toast.toast?.message ?? null}

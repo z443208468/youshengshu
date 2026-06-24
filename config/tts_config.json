@@ -1,0 +1,30 @@
+{
+  "paths": {
+    "source_mode": "cn_chapters_dir",
+    "source_path": "data/cn_chapters",
+    "output_dir": "data/audio_projects/default",
+    "manifest_file": "data/audio_projects/default/audio_manifest.json"
+  },
+  "segmentation": {
+    "target_chars_min": 80,
+    "target_chars_max": 180,
+    "hard_chars_max": 240,
+    "punctuation": "。！？；……\n"
+  },
+  "cosyvoice": {
+    "base_url": "http://127.0.0.1:50000",
+    "mode": "sft",
+    "spk_id": "中文女",
+    "prompt_text": "",
+    "prompt_audio_path": "",
+    "instruct_text": "用自然、稳定的有声书旁白语气朗读。",
+    "request_timeout_seconds": 120,
+    "max_retries": 2,
+    "retry_sleep_seconds": 2,
+    "sample_rate": 22050
+  },
+  "audio": {
+    "output_format": "wav",
+    "sample_rate": 22050
+  }
+}

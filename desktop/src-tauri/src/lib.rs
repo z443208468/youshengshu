@@ -10,6 +10,7 @@ use tokio::process::Command;
 // ---------------------------------------------------------------------------
 
 const PYTHON_MODULE_NAME: &str = "youshengshu.cli";
+const TTS_PYTHON_MODULE_NAME: &str = "youshengshu_tts.cli";
 const LOG_EVENT_NAME: &str = "youshengshu-log";
 
 // ---------------------------------------------------------------------------
@@ -68,8 +69,14 @@ enum ActiveTask {
 }
 
 struct ActiveProcess(Mutex<Option<ActiveTask>>);
+struct ActiveTtsProcess(Mutex<Option<ActiveTask>>);
 
 fn clear_active_task(state: &tauri::State<'_, ActiveProcess>) {
+    let mut guard = state.0.lock().unwrap();
+    *guard = None;
+}
+
+fn clear_active_tts_task(state: &tauri::State<'_, ActiveTtsProcess>) {
     let mut guard = state.0.lock().unwrap();
     *guard = None;
 }
@@ -558,6 +565,38 @@ fn write_youshengshu_config(paths: UiPaths) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn write_json_config(
+    repo_root: String,
+    config_path: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    let repo_root = std::path::PathBuf::from(repo_root);
+
+    if !repo_root.exists() {
+        return Err(format!("repo_root 不存在: {}", repo_root.to_string_lossy()));
+    }
+
+    let full_path = repo_root.join(config_path);
+
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建配置目录失败: {e}"))?;
+    }
+
+    let text = serde_json::to_string_pretty(&payload)
+        .map_err(|e| format!("序列化 JSON 配置失败: {e}"))?;
+
+    let tmp = full_path.with_extension("json.tmp");
+    std::fs::write(&tmp, text)
+        .map_err(|e| format!("写入临时配置失败: {e}"))?;
+
+    std::fs::rename(&tmp, &full_path)
+        .map_err(|e| format!("替换配置文件失败: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn append_ui_log(
     stream: String,
     line: String,
@@ -617,6 +656,72 @@ fn build_python_cli_command(
             }
         }
 
+        if let Some(idx) = chapter_index {
+            if idx > 0 {
+                args.push("--chapter-index".to_string());
+                args.push(idx.to_string());
+            }
+        }
+    }
+
+    let src_dir = repo_root_path.join("src");
+    let display = format!("{} {}", python_command, args.join(" "));
+
+    Ok(CommandSpec {
+        program: python_command.to_string(),
+        args,
+        cwd: repo_root_path,
+        env_pythonpath: src_dir,
+        display,
+    })
+}
+
+fn build_tts_cli_command(
+    repo_root: &str,
+    python_command: &str,
+    cli_command: &str,
+    config_path: &str,
+    json_output: bool,
+    chapter_index: Option<u32>,
+) -> Result<CommandSpec, String> {
+    let allowed = [
+        "doctor",
+        "create-project",
+        "status",
+        "segment",
+        "synthesize",
+        "synthesize-next",
+        "synthesize-all",
+    ];
+    if !allowed.contains(&cli_command) {
+        return Err(format!("不允许的 TTS 命令: {}", cli_command));
+    }
+
+    let repo_root_path = std::path::PathBuf::from(repo_root);
+    let cli_path = repo_root_path
+        .join("src")
+        .join("youshengshu_tts")
+        .join("cli.py");
+    if !cli_path.exists() {
+        return Err(format!(
+            "项目根目录无效，未找到 TTS Python CLI: {}。请选择包含 src/youshengshu_tts/cli.py 的仓库根目录。",
+            cli_path.display()
+        ));
+    }
+
+    let mut args: Vec<String> = vec![
+        "-m".to_string(),
+        TTS_PYTHON_MODULE_NAME.to_string(),
+        "--config".to_string(),
+        config_path.to_string(),
+        cli_command.to_string(),
+    ];
+
+    if json_output {
+        args.push("--json".to_string());
+    }
+
+    if cli_command == "segment" || cli_command == "synthesize" {
         if let Some(idx) = chapter_index {
             if idx > 0 {
                 args.push("--chapter-index".to_string());
@@ -913,6 +1018,242 @@ async fn kill_python_process(
 }
 
 // ---------------------------------------------------------------------------
+// Command: run_tts_cli
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn run_tts_cli(
+    app: tauri::AppHandle,
+    repo_root: String,
+    python_command: String,
+    cli_command: String,
+    config_path: String,
+    json_output: bool,
+    chapter_index: Option<u32>,
+    state: tauri::State<'_, ActiveTtsProcess>,
+) -> Result<ProcessOutput, String> {
+    if repo_root.trim().is_empty() {
+        return Err("项目根目录 repoRoot 为空，请先在 UI 中选择仓库根目录".to_string());
+    }
+
+    if config_path.trim().is_empty() {
+        return Err("TTS 配置文件路径为空".to_string());
+    }
+
+    {
+        let mut guard = state.0.lock().unwrap();
+        if guard.is_some() {
+            return Err("已有 TTS 任务正在运行，请先停止或等待完成。".to_string());
+        }
+        *guard = Some(ActiveTask::Starting);
+    }
+
+    let spec = match build_tts_cli_command(
+        &repo_root,
+        &python_command,
+        &cli_command,
+        &config_path,
+        json_output,
+        chapter_index,
+    ) {
+        Ok(spec) => spec,
+        Err(e) => {
+            clear_active_tts_task(&state);
+            return Err(e);
+        }
+    };
+
+    let started_at = iso_now();
+    let repo_root_path = std::path::PathBuf::from(&repo_root);
+    let opened_log = match open_log_file(&repo_root_path) {
+        Ok(opened) => opened,
+        Err(e) => {
+            clear_active_tts_task(&state);
+            return Err(e);
+        }
+    };
+    let log_file_path = opened_log.path.to_string_lossy().to_string();
+    let log_file = std::sync::Arc::new(std::sync::Mutex::new(opened_log.file));
+    write_log_line(
+        &mut *log_file.lock().unwrap(),
+        "system",
+        &format!("Working directory: {}", repo_root),
+    );
+    write_log_line(
+        &mut *log_file.lock().unwrap(),
+        "system",
+        &format!("Command: {}", spec.display),
+    );
+
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: format!("Working directory: {}", repo_root),
+        },
+    );
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: format!("Command: {}", spec.display),
+        },
+    );
+
+    let mut cmd = Command::new(&spec.program);
+    cmd.current_dir(&spec.cwd);
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONUNBUFFERED", "1");
+
+    let pythonpath_val = spec.env_pythonpath.to_string_lossy().to_string();
+    if let Ok(old) = std::env::var("PYTHONPATH") {
+        if !old.trim().is_empty() {
+            cmd.env("PYTHONPATH", format!("{};{}", pythonpath_val, old));
+        } else {
+            cmd.env("PYTHONPATH", &pythonpath_val);
+        }
+    } else {
+        cmd.env("PYTHONPATH", &pythonpath_val);
+    }
+
+    for arg in &spec.args {
+        cmd.arg(arg);
+    }
+
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            clear_active_tts_task(&state);
+            format!("启动 TTS 进程失败: {e}")
+        })?;
+
+    let stdout_handle = child
+        .stdout
+        .take()
+        .ok_or_else(|| "无法获取 stdout".to_string())?;
+    let stderr_handle = child
+        .stderr
+        .take()
+        .ok_or_else(|| "无法获取 stderr".to_string())?;
+
+    {
+        let mut guard = state.0.lock().unwrap();
+        *guard = Some(ActiveTask::Running(child));
+    }
+
+    let app_handle = app.clone();
+    let log_file_clone = log_file.clone();
+    let stdout_reader = tokio::spawn(async move {
+        let reader = tokio::io::BufReader::new(stdout_handle);
+        let mut lines = reader.lines();
+        let mut collected = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            collected.push_str(&line);
+            collected.push('\n');
+            write_log_line(&mut *log_file_clone.lock().unwrap(), "stdout", &line);
+            let _ = app_handle.emit(
+                LOG_EVENT_NAME,
+                LogPayload {
+                    stream: "stdout".to_string(),
+                    line: line.clone(),
+                },
+            );
+        }
+        collected
+    });
+
+    let app_handle2 = app.clone();
+    let log_file_clone2 = log_file.clone();
+    let stderr_reader = tokio::spawn(async move {
+        let reader = tokio::io::BufReader::new(stderr_handle);
+        let mut lines = reader.lines();
+        let mut collected = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            collected.push_str(&line);
+            collected.push('\n');
+            write_log_line(&mut *log_file_clone2.lock().unwrap(), "stderr", &line);
+            let _ = app_handle2.emit(
+                LOG_EVENT_NAME,
+                LogPayload {
+                    stream: "stderr".to_string(),
+                    line: line.clone(),
+                },
+            );
+        }
+        collected
+    });
+
+    let (stdout, stderr) = tokio::join!(stdout_reader, stderr_reader);
+    let stdout = stdout.unwrap_or_default();
+    let stderr = stderr.unwrap_or_default();
+
+    let mut child_to_wait = {
+        let mut guard = state.0.lock().unwrap();
+        match guard.take() {
+            Some(ActiveTask::Running(child)) => Some(child),
+            _ => None,
+        }
+    };
+    let status = if let Some(ref mut child) = child_to_wait {
+        child.wait().await.unwrap_or_default()
+    } else {
+        std::process::ExitStatus::default()
+    };
+    let code = status.code().unwrap_or(-1);
+    let finished_at = iso_now();
+
+    let summary = format!(
+        "TTS process finished: code={}, stdout_len={}, stderr_len={}",
+        code,
+        stdout.len(),
+        stderr.len()
+    );
+    write_log_line(&mut *log_file.lock().unwrap(), "system", &summary);
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: summary,
+        },
+    );
+
+    Ok(ProcessOutput {
+        code,
+        stdout,
+        stderr,
+        command_line: spec.display,
+        started_at,
+        finished_at,
+        log_file_path,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Command: kill_tts_process
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn kill_tts_process(state: tauri::State<'_, ActiveTtsProcess>) -> Result<(), String> {
+    let child_to_kill = {
+        let mut guard = state.0.lock().unwrap();
+        match guard.take() {
+            Some(ActiveTask::Running(child)) => Some(child),
+            Some(ActiveTask::Starting) | None => None,
+        }
+    };
+    if let Some(mut child) = child_to_kill {
+        child
+            .kill()
+            .await
+            .map_err(|e| format!("终止 TTS 进程失败: {e}"))?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // App entry
 // ---------------------------------------------------------------------------
 
@@ -922,6 +1263,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(ActiveProcess(Mutex::new(None)))
+        .manage(ActiveTtsProcess(Mutex::new(None)))
         .manage(UiSessionLog(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_repo_root,
@@ -929,9 +1271,12 @@ pub fn run() {
             resolve_path,
             read_youshengshu_config,
             write_youshengshu_config,
+            write_json_config,
             append_ui_log,
             run_python_cli,
             kill_python_process,
+            run_tts_cli,
+            kill_tts_process,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
