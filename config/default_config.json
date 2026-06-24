@@ -1,33 +1,33 @@
 {
-  "paths": {
-    "input_file": "data/input/ReZero_Watching_Him_Die.txt",
-    "en_chapters_dir": "data/en_chapters",
-    "cn_chapters_dir": "data/cn_chapters",
-    "manifest_file": "data/manifests/translation_manifest.json"
-  },
   "chapter_split": {
-    "strict_chapter_sequence": true,
-    "min_valid_chapter_chars": 3000
-  },
-  "lmstudio": {
-    "base_url": "http://localhost:1234/v1",
-    "api_key": "lm-studio",
-    "model_id": "auto",
-    "temperature": 0.2,
-    "top_p": 0.85,
-    "request_timeout_seconds": 1800,
-    "max_retries": 1,
-    "retry_sleep_seconds": 5
+    "min_valid_chapter_chars": 3000,
+    "strict_chapter_sequence": true
   },
   "chunking": {
-    "min_unit": "paragraph",
     "initial_paragraphs_per_batch": 8,
     "min_paragraphs_per_batch": 1,
+    "min_unit": "paragraph",
     "overflow_backoff_factor": 0.5
+  },
+  "lmstudio": {
+    "api_key": "lm-studio",
+    "base_url": "http://localhost:1234/v1",
+    "max_retries": 1,
+    "model_id": "auto",
+    "request_timeout_seconds": 1800,
+    "retry_sleep_seconds": 5,
+    "temperature": 0.2,
+    "top_p": 0.85
+  },
+  "paths": {
+    "cn_chapters_dir": "data/cn_chapters",
+    "en_chapters_dir": "data/en_chapters",
+    "input_file": "data/input/ReZero_Watching_Him_Die.txt",
+    "manifest_file": "data/manifests/translation_manifest.json"
   },
   "translation": {
     "skip_existing_done_chapters": true,
-    "write_partial_file": true,
-    "strip_model_preamble": true
+    "strip_model_preamble": true,
+    "write_partial_file": true
   }
 }

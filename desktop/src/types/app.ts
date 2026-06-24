@@ -135,6 +135,7 @@ export type TtsTaskState =
 export type TtsServiceStatus =
   | "unchecked"
   | "checking"
+  | "starting"
   | "connected"
   | "disconnected"
   | "error";

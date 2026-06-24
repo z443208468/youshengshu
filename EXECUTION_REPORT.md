@@ -330,8 +330,16 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - Translation page keeps left/right layout inside flex h-full w-full container: PASS
 - TTS page root is flex h-full w-full overflow-hidden: PASS
 - TTS left panel order is service/source/provider/action: PASS
-- TTS service card has unchecked/checking/connected/disconnected/error states: PASS
-- TTS disconnected CosyVoice state is visible in-page: PASS
+- TTS service card has unchecked/checking/starting/connected/disconnected/error states: PASS
+- TTS page auto-starts CosyVoice service on mount: PASS/FAIL
+- TTS UI no longer asks user to manually start start_cosyvoice_api.bat: PASS/FAIL
+- start_cosyvoice_service is implemented in Rust and exposed in tauri.ts: PASS/FAIL
+- TTS path dialogs pass defaultPath based on resolvePath: PASS/FAIL
+- sourcePath/outputDir are synchronized from manifest status payload after refresh: PASS/FAIL
+- Open audio directory uses opener revealItemInDir instead of only logging path: PASS/FAIL
+- CosyVoice autostart launches runtime/python/fastapi/server.py, not webui.py: PASS/FAIL
+- start_cosyvoice_service directly owns the Python FastAPI process: PASS/FAIL
+- tools/tts/start_cosyvoice_api.bat is diagnostic only and also targets server.py: PASS/FAIL
 - TTS mode fields are conditional and instruct2 is absent: PASS
 - TTS table action column is rightmost: PASS
 - TTS row buttons include chapter number: PASS

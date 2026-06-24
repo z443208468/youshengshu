@@ -71,6 +71,10 @@ enum ActiveTask {
 struct ActiveProcess(Mutex<Option<ActiveTask>>);
 struct ActiveTtsProcess(Mutex<Option<ActiveTask>>);
 
+struct ActiveCosyVoiceProcess {
+    child: std::sync::Mutex<Option<std::process::Child>>,
+}
+
 fn clear_active_task(state: &tauri::State<'_, ActiveProcess>) {
     let mut guard = state.0.lock().unwrap();
     *guard = None;
@@ -1254,6 +1258,89 @@ async fn kill_tts_process(state: tauri::State<'_, ActiveTtsProcess>) -> Result<(
 }
 
 // ---------------------------------------------------------------------------
+// Command: start_cosyvoice_service / kill_cosyvoice_service
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn start_cosyvoice_service(
+    repo_root: String,
+    python_command: String,
+    active: tauri::State<ActiveCosyVoiceProcess>,
+) -> Result<(), String> {
+    let mut guard = active
+        .child
+        .lock()
+        .map_err(|_| "CosyVoice process lock poisoned".to_string())?;
+
+    if let Some(child) = guard.as_mut() {
+        match child.try_wait() {
+            Ok(None) => return Ok(()),
+            Ok(Some(_status)) => {
+                *guard = None;
+            }
+            Err(error) => {
+                *guard = None;
+                return Err(format!("检查 CosyVoice 进程状态失败: {error}"));
+            }
+        }
+    }
+
+    let cosyvoice_root = std::path::Path::new(&repo_root)
+        .join("third_party")
+        .join("tts")
+        .join("CosyVoice");
+
+    let fastapi_dir = cosyvoice_root
+        .join("runtime")
+        .join("python")
+        .join("fastapi");
+
+    let server_py = fastapi_dir.join("server.py");
+
+    if !server_py.exists() {
+        return Err(format!(
+            "CosyVoice FastAPI server.py 不存在: {}",
+            server_py.display()
+        ));
+    }
+
+    let default_model_dir = cosyvoice_root
+        .join("pretrained_models")
+        .join("CosyVoice-300M");
+
+    let model_dir = std::env::var("COSYVOICE_MODEL_DIR")
+        .unwrap_or_else(|_| default_model_dir.display().to_string());
+
+    let child = std::process::Command::new(&python_command)
+        .arg("server.py")
+        .arg("--port")
+        .arg("50000")
+        .arg("--model_dir")
+        .arg(&model_dir)
+        .current_dir(&fastapi_dir)
+        .spawn()
+        .map_err(|error| format!("启动 CosyVoice FastAPI 服务失败: {error}"))?;
+
+    *guard = Some(child);
+    Ok(())
+}
+
+#[tauri::command]
+fn kill_cosyvoice_service(active: tauri::State<ActiveCosyVoiceProcess>) -> Result<(), String> {
+    let mut guard = active
+        .child
+        .lock()
+        .map_err(|_| "CosyVoice process lock poisoned".to_string())?;
+
+    if let Some(child) = guard.as_mut() {
+        let _ = child.kill();
+    }
+
+    *guard = None;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // App entry
 // ---------------------------------------------------------------------------
 
@@ -1264,6 +1351,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(ActiveProcess(Mutex::new(None)))
         .manage(ActiveTtsProcess(Mutex::new(None)))
+        .manage(ActiveCosyVoiceProcess {
+            child: std::sync::Mutex::new(None),
+        })
         .manage(UiSessionLog(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_repo_root,
@@ -1277,6 +1367,8 @@ pub fn run() {
             kill_python_process,
             run_tts_cli,
             kill_tts_process,
+            start_cosyvoice_service,
+            kill_cosyvoice_service,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

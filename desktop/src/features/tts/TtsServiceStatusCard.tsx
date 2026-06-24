@@ -11,11 +11,10 @@ interface TtsServiceStatusCardProps {
 function statusText(status: TtsServiceStatus, error: string | null): string {
   if (status === "unchecked") return "尚未检查 CosyVoice 服务。";
   if (status === "checking") return "正在检查 CosyVoice 服务...";
+  if (status === "starting") return "正在自动启动 CosyVoice 服务，请等待连接完成。";
   if (status === "connected") return "CosyVoice 服务已连接。";
-  if (status === "disconnected") {
-    return "CosyVoice 服务未连接。请先启动本地 FastAPI 服务：tools/tts/start_cosyvoice_api.bat";
-  }
-  return `CosyVoice 服务检查失败：${error ?? "未知错误"}`;
+  if (status === "disconnected") return "CosyVoice 服务未连接，应用正在尝试自动启动。";
+  return `CosyVoice 服务自动启动失败：${error ?? "未知错误"}`;
 }
 
 export function TtsServiceStatusCard({
@@ -25,7 +24,7 @@ export function TtsServiceStatusCard({
   error,
   onCheck,
 }: TtsServiceStatusCardProps) {
-  const checking = status === "checking";
+  const busy = status === "checking" || status === "starting";
 
   return (
     <section className="rounded-xl border border-border bg-card p-4">
@@ -57,11 +56,11 @@ export function TtsServiceStatusCard({
       <button
         type="button"
         onClick={onCheck}
-        disabled={checking}
-        aria-busy={checking}
+        disabled={busy}
+        aria-busy={busy}
         className="mt-3 w-full rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {checking ? "检查中..." : "检查服务"}
+        {busy ? "处理中..." : "检查服务"}
       </button>
     </section>
   );

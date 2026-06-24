@@ -227,12 +227,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-git grep "CosyVoice 服务未连接" -- desktop/src/features/tts >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] TTS disconnected state message missing
-  exit /b 1
-)
-
 git grep "生成第" -- desktop/src/features/tts >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] TTS chapter action buttons must include chapter number
@@ -326,6 +320,96 @@ if errorlevel 1 (
 git grep "@tauri-apps/plugin-dialog" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] TtsWorkbench must import plugin-dialog open
+  exit /b 1
+)
+
+git grep "start_cosyvoice_service" -- desktop/src-tauri/src/lib.rs desktop/src/lib/tauri.ts >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice service autostart command missing
+  exit /b 1
+)
+
+git grep "ensureCosyVoiceServiceReady" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TTS page must auto ensure CosyVoice service
+  exit /b 1
+)
+
+git grep "startCosyVoiceService" -- desktop/src/features/tts/TtsWorkbench.tsx desktop/src/lib/tauri.ts >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TTS UI must call startCosyVoiceService
+  exit /b 1
+)
+
+git grep "defaultPath" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TTS path dialogs must set defaultPath
+  exit /b 1
+)
+
+git grep "resolvePath" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TTS must use resolvePath for actual source/output paths
+  exit /b 1
+)
+
+git grep "revealItemInDir" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Open audio directory must use opener revealItemInDir
+  exit /b 1
+)
+
+git grep "请先启动本地 FastAPI 服务" -- desktop/src/features/tts *.md >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] UI must not ask user to manually start CosyVoice service
+  exit /b 1
+)
+
+git grep "start_cosyvoice_api.bat" -- desktop/src/features/tts/TtsServiceStatusCard.tsx >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] TTS service status card must not reference manual bat startup
+  exit /b 1
+)
+
+git grep "webui.py --port 50000" -- tools desktop src tests *.md >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] TTS autostart must not use CosyVoice webui.py
+  exit /b 1
+)
+
+git grep "runtime\\python\\fastapi" -- desktop/src-tauri/src/lib.rs tools/tts/start_cosyvoice_api.bat >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice startup must target runtime/python/fastapi
+  exit /b 1
+)
+
+git grep "server.py" -- desktop/src-tauri/src/lib.rs tools/tts/start_cosyvoice_api.bat >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice startup must target FastAPI server.py
+  exit /b 1
+)
+
+git grep "revealItemInDir(wav) 或 openPath" -- *.md desktop src tests tools >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] handleOpenAudioDir must not leave revealItemInDir/openPath choice
+  exit /b 1
+)
+
+git grep "若保持 sync 签名" -- *.md desktop src tests tools >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] buildTtsConfigPayload async/sync choice must not remain
+  exit /b 1
+)
+
+git grep "await buildTtsConfigPayload" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] saveTtsConfigOnly must await async buildTtsConfigPayload
+  exit /b 1
+)
+
+git grep "const busy = status === \"checking\" || status === \"starting\"" -- desktop/src/features/tts/TtsServiceStatusCard.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TtsServiceStatusCard must disable button while checking or starting
   exit /b 1
 )
 

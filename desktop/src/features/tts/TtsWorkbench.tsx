@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import type {
   TtsChapterRow,
@@ -10,7 +11,9 @@ import type {
 } from "../../types/app";
 import {
   killTtsProcess,
+  resolvePath,
   runTtsCli,
+  startCosyVoiceService,
   writeJsonConfig,
 } from "../../lib/tauri";
 
@@ -25,6 +28,10 @@ interface TtsWorkbenchProps {
   runtimeMismatch: unknown;
   repoRoot: string;
   pythonCommand: string;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export function TtsWorkbench({
@@ -68,13 +75,19 @@ export function TtsWorkbench({
     setTtsSettings((current) => ({ ...current, ...patch }));
   };
 
-  function buildTtsConfigPayload(settings: TtsSettings) {
+  async function buildTtsConfigPayload(settings: TtsSettings) {
+    const actualSourcePath = await resolvePath(settings.repoRoot, settings.sourcePath);
+    const actualOutputDir = await resolvePath(settings.repoRoot, settings.outputDir);
+    const promptAudioPath = settings.promptAudioPath.trim().length > 0
+      ? await resolvePath(settings.repoRoot, settings.promptAudioPath)
+      : "";
+
     return {
       paths: {
         source_mode: settings.sourceMode,
-        source_path: settings.sourcePath,
-        output_dir: settings.outputDir,
-        manifest_file: `${settings.outputDir.replace(/\\/g, "/")}/audio_manifest.json`,
+        source_path: actualSourcePath,
+        output_dir: actualOutputDir,
+        manifest_file: `${actualOutputDir.replace(/\\/g, "/")}/audio_manifest.json`,
       },
       segmentation: {
         target_chars_min: 80,
@@ -87,7 +100,7 @@ export function TtsWorkbench({
         mode: settings.voiceMode,
         spk_id: settings.spkId,
         prompt_text: settings.promptText,
-        prompt_audio_path: settings.promptAudioPath,
+        prompt_audio_path: promptAudioPath,
         instruct_text: settings.instructText,
         request_timeout_seconds: 120,
         max_retries: 2,
@@ -102,10 +115,12 @@ export function TtsWorkbench({
   }
 
   async function saveTtsConfigOnly() {
+    const payload = await buildTtsConfigPayload(ttsSettings);
+
     await writeJsonConfig(
       ttsSettings.repoRoot,
       ttsSettings.ttsConfigPath,
-      buildTtsConfigPayload(ttsSettings),
+      payload,
     );
     appendTtsLog(`TTS 配置已保存: ${ttsSettings.ttsConfigPath}`);
   }
@@ -133,6 +148,12 @@ export function TtsWorkbench({
 
     const payload = JSON.parse(output.stdout) as TtsStatusPayload;
     setTtsStatus(payload);
+
+    patchTtsSettings({
+      sourcePath: payload.source_path.replace(/\\/g, "/"),
+      outputDir: payload.output_dir.replace(/\\/g, "/"),
+    });
+
     appendTtsLog(
       `TTS 状态已刷新: total=${payload.total}, done=${payload.done}, pending=${payload.pending}, failed=${payload.failed}`,
     );
@@ -259,42 +280,79 @@ export function TtsWorkbench({
     }
   }
 
-  async function handleCheckService() {
-    setServiceStatus("checking");
-    setServiceError(null);
-    setTaskState("checking_service");
-    appendTtsLog("正在检查 CosyVoice 服务。");
-
+  async function checkCosyVoiceDocs(): Promise<boolean> {
     try {
-      const response = await fetch(`${ttsSettings.providerBaseUrl.replace(/\/$/, "")}/docs`, {
-        method: "GET",
-      });
-
-      if (response.ok) {
-        setServiceStatus("connected");
-        appendTtsLog("CosyVoice 服务已连接。");
-        setTaskState("idle");
-        return;
-      }
-
-      const message = `HTTP ${response.status}`;
-      setServiceStatus("disconnected");
-      setServiceError(message);
-      appendTtsLog(`CosyVoice 服务未连接: ${message}`);
-      setTaskState("idle");
-    } catch (error) {
-      const message = errorToMessage(error);
-      setServiceStatus("disconnected");
-      setServiceError(message);
-      appendTtsLog(`CosyVoice 服务检查失败: ${message}`);
-      setTaskState("idle");
+      const response = await fetch(
+        `${ttsSettings.providerBaseUrl.replace(/\/$/, "")}/docs`,
+        { method: "GET" },
+      );
+      return response.ok;
+    } catch {
+      return false;
     }
   }
 
+  async function ensureCosyVoiceServiceReady() {
+    setServiceStatus("checking");
+    setServiceError(null);
+    appendTtsLog("正在检查 CosyVoice 服务。");
+
+    const alreadyConnected = await checkCosyVoiceDocs();
+
+    if (alreadyConnected) {
+      setServiceStatus("connected");
+      appendTtsLog("CosyVoice 服务已连接。");
+      return;
+    }
+
+    setServiceStatus("starting");
+    appendTtsLog("CosyVoice 服务未连接，开始自动启动 runtime/python/fastapi/server.py。");
+
+    try {
+      await startCosyVoiceService(ttsSettings.repoRoot, pythonCommand);
+    } catch (error) {
+      const message = errorToMessage(error);
+      setServiceStatus("error");
+      setServiceError(message);
+      appendTtsLog(`CosyVoice 服务自动启动失败: ${message}`);
+      return;
+    }
+
+    for (let attempt = 1; attempt <= 30; attempt += 1) {
+      appendTtsLog(`等待 CosyVoice 服务启动: ${attempt}/30`);
+      await sleep(1000);
+
+      const connected = await checkCosyVoiceDocs();
+
+      if (connected) {
+        setServiceStatus("connected");
+        setServiceError(null);
+        appendTtsLog("CosyVoice 服务已自动启动并连接。");
+        return;
+      }
+    }
+
+    const message = "CosyVoice 服务启动超时，30 秒内未连通 /docs。";
+    setServiceStatus("error");
+    setServiceError(message);
+    appendTtsLog(message);
+  }
+
+  useEffect(() => {
+    void ensureCosyVoiceServiceReady();
+  }, []);
+
+  async function handleCheckService() {
+    await ensureCosyVoiceServiceReady();
+  }
+
   async function handlePickSource() {
+    const defaultPath = await resolvePath(ttsSettings.repoRoot, ttsSettings.sourcePath);
+
     const selected = await open({
       directory: ttsSettings.sourceMode === "cn_chapters_dir",
       multiple: false,
+      defaultPath,
       filters:
         ttsSettings.sourceMode === "txt_file"
           ? [{ name: "Text", extensions: ["txt"] }]
@@ -306,14 +364,17 @@ export function TtsWorkbench({
       return;
     }
 
-    patchTtsSettings({ sourcePath: selected });
+    patchTtsSettings({ sourcePath: selected.replace(/\\/g, "/") });
     appendTtsLog(`TTS 输入来源已选择: ${selected}`);
   }
 
   async function handlePickOutputDir() {
+    const defaultPath = await resolvePath(ttsSettings.repoRoot, ttsSettings.outputDir);
+
     const selected = await open({
       directory: true,
       multiple: false,
+      defaultPath,
     });
 
     if (typeof selected !== "string") {
@@ -321,14 +382,20 @@ export function TtsWorkbench({
       return;
     }
 
-    patchTtsSettings({ outputDir: selected });
+    patchTtsSettings({ outputDir: selected.replace(/\\/g, "/") });
     appendTtsLog(`TTS 输出目录已选择: ${selected}`);
   }
 
   async function handlePickPromptAudio() {
+    const defaultPath =
+      ttsSettings.promptAudioPath.trim().length > 0
+        ? dirname(await resolvePath(ttsSettings.repoRoot, ttsSettings.promptAudioPath))
+        : await resolvePath(ttsSettings.repoRoot, "data");
+
     const selected = await open({
       directory: false,
       multiple: false,
+      defaultPath,
       filters: [{ name: "WAV Audio", extensions: ["wav"] }],
     });
 
@@ -337,7 +404,7 @@ export function TtsWorkbench({
       return;
     }
 
-    patchTtsSettings({ promptAudioPath: selected });
+    patchTtsSettings({ promptAudioPath: selected.replace(/\\/g, "/") });
     appendTtsLog(`提示音频已选择: ${selected}`);
   }
 
@@ -358,8 +425,9 @@ export function TtsWorkbench({
       return;
     }
 
-    const audioDir = dirname(row.chapter_wav_path);
-    appendTtsLog(`第 ${chapterIndex} 章音频目录: ${audioDir}`);
+    const actualPath = row.chapter_wav_path.replace(/\\/g, "/");
+    appendTtsLog(`正在打开第 ${chapterIndex} 章音频文件位置: ${actualPath}`);
+    await revealItemInDir(actualPath);
   }
 
   return (

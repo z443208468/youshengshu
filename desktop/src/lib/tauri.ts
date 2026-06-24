@@ -115,6 +115,17 @@ export async function killTtsProcess(): Promise<void> {
   return invoke<void>("kill_tts_process");
 }
 
+export async function startCosyVoiceService(
+  repoRoot: string,
+  pythonCommand: string,
+): Promise<void> {
+  await invoke("start_cosyvoice_service", { repoRoot, pythonCommand });
+}
+
+export async function killCosyVoiceService(): Promise<void> {
+  await invoke("kill_cosyvoice_service");
+}
+
 // ---- Event listeners ----
 
 export async function listenToLogs(
