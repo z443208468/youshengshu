@@ -410,7 +410,7 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 
 ### Verification
 
-- python -m pytest -q: PASS (72 passed)
+- python -m pytest -q: PASS (79 passed)
 - python -m youshengshu_tts.cli --help: PASS
 - TTS doctor smoke: PASS
 - TTS synthesize with fake provider: PASS (pytest)
@@ -418,4 +418,4 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - cargo check: PASS
 - cargo test: PASS (8 passed)
 - dev_check.bat: PASS
-- LOCAL_HEAD == REMOTE_HEAD: PASS (538e658)
+- LOCAL_HEAD == REMOTE_HEAD: PASS (d9383f2)
