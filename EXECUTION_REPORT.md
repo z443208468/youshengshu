@@ -308,4 +308,4 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - manual cold start shows UI head == Repo head: NOT RUN
 - manual cold start shows "连续翻译待处理章节": NOT RUN
 - manual cold start shows ChapterTable 操作列: NOT RUN
-- LOCAL_HEAD == REMOTE_HEAD: PENDING
+- LOCAL_HEAD == REMOTE_HEAD: PASS (e6b3542)
