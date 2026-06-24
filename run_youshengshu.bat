@@ -52,6 +52,19 @@ if not exist "node_modules" (
 
 set YSS_REPO_ROOT=%REPO_ROOT%
 
+echo [SYSTEM] Runtime preflight...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%scripts\windows\preflight-runtime.ps1" -RepoRoot "%REPO_ROOT%."
+if errorlevel 1 (
+  echo [ERROR] Runtime preflight failed.
+  pause
+  exit /b 1
+)
+
+for /f %%i in ('git rev-parse --short HEAD') do set LOCAL_HEAD=%%i
+echo [SYSTEM] Git HEAD: %LOCAL_HEAD%
+echo [SYSTEM] Expected UI source: %REPO_ROOT%desktop\src
+echo [SYSTEM] Expected Vite URL: http://localhost:1420
+
 call "%REPO_ROOT%setup_msvc_env.bat"
 if errorlevel 1 (
   echo [ERROR] MSVC/Windows SDK environment setup failed.

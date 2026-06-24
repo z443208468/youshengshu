@@ -29,6 +29,12 @@ import {
   parseSplitJson,
   parseStatusErrorJson,
 } from "@/lib/status";
+import {
+  FRONTEND_BUILD_GIT_HEAD,
+  FRONTEND_BUILD_GIT_SHORT_HEAD,
+  FRONTEND_BUILD_REPO_ROOT,
+  FRONTEND_BUILD_TIME,
+} from "@/generated/buildInfo";
 import type {
   UiSettings,
   TaskState,
@@ -36,6 +42,7 @@ import type {
   LogLine,
   DoctorPayload,
   AppContext,
+  RuntimeMismatch,
 } from "@/types/app";
 
 export default function App() {
@@ -48,6 +55,8 @@ export default function App() {
   const [health, setHealth] = useState<DoctorPayload | null>(null);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [logFilePath, setLogFilePath] = useState<string | null>(null);
+  const [runtimeContext, setRuntimeContext] = useState<AppContext | null>(null);
+  const [runtimeMismatch, setRuntimeMismatch] = useState<RuntimeMismatch | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
   const commandRunningRef = useRef(false);
   const toast = useToast();
@@ -190,8 +199,47 @@ export default function App() {
             isValidRepoRoot: true,
             detectedFrom: "fallback",
             cliPath: "",
+            gitHead: "unknown",
+            gitShortHead: "unknown",
+            gitBranch: "unknown",
           };
         }
+
+        setRuntimeContext(context);
+
+        const frontendHead: string = FRONTEND_BUILD_GIT_HEAD;
+        const runtimeHead: string = context.gitHead;
+        const isKnown = frontendHead !== "unknown" && runtimeHead !== "unknown";
+        const mismatch = isKnown && frontendHead !== runtimeHead;
+
+        if (mismatch) {
+          setRuntimeMismatch({
+            frontendHead,
+            runtimeHead,
+            frontendRepoRoot: FRONTEND_BUILD_REPO_ROOT,
+            runtimeRepoRoot: context.repoRoot,
+          });
+          appendLog(
+            "stderr",
+            `前端版本与运行仓库不一致：UI=${FRONTEND_BUILD_GIT_SHORT_HEAD}, Repo=${context.gitShortHead}, UI_ROOT=${FRONTEND_BUILD_REPO_ROOT}, RUNTIME_ROOT=${context.repoRoot}`,
+          );
+          toast.show("前端版本与运行仓库不一致，请冷启动", "error");
+        } else {
+          setRuntimeMismatch(null);
+          appendLog(
+            "system",
+            `前端/运行仓库版本一致：${FRONTEND_BUILD_GIT_SHORT_HEAD}`,
+          );
+        }
+
+        appendLog(
+          "system",
+          `Frontend bundle: ${FRONTEND_BUILD_GIT_SHORT_HEAD} built_at=${FRONTEND_BUILD_TIME} root=${FRONTEND_BUILD_REPO_ROOT}`,
+        );
+        appendLog(
+          "system",
+          `Runtime repo: ${context.gitShortHead} branch=${context.gitBranch} root=${context.repoRoot}`,
+        );
 
         setSettings((prev) => ({
           ...prev,
@@ -269,6 +317,17 @@ export default function App() {
     setLogs([]);
   }, []);
 
+  const hasRuntimeMismatch = runtimeMismatch !== null;
+
+  const blockOnRuntimeMismatch = useCallback(() => {
+    if (hasRuntimeMismatch) {
+      appendLog("stderr", "前端版本与运行仓库不一致，已阻止执行任务。请冷启动。");
+      toast.show("UI/Repo 版本不一致，已阻止执行", "error");
+      return true;
+    }
+    return false;
+  }, [hasRuntimeMismatch, appendLog, toast]);
+
   const validateRepoRoot = useCallback(() => {
     if (!settings.repoRoot.trim()) {
       appendLog(
@@ -305,6 +364,7 @@ export default function App() {
   }, []);
 
   const saveConfig = useCallback(async () => {
+    if (blockOnRuntimeMismatch()) return;
     if (!validateRepoRoot()) return;
 
     appendLog("system", "保存配置...");
@@ -321,9 +381,10 @@ export default function App() {
       appendLog("stderr", `保存配置失败: ${err}`);
       toast.show(`保存配置失败: ${err}`, "error");
     }
-  }, [settings, appendLog, toast, validateRepoRoot, runDoctorCmd]);
+  }, [settings, appendLog, toast, validateRepoRoot, runDoctorCmd, blockOnRuntimeMismatch]);
 
   const refreshStatus = useCallback(async () => {
+    if (blockOnRuntimeMismatch()) return;
     if (!validateRepoRoot()) return;
 
     setTaskState("refreshing");
@@ -400,9 +461,10 @@ export default function App() {
       toast.show(`刷新状态失败: ${err}`, "error");
     }
     setTaskState("idle");
-  }, [settings, appendLog, toast, validateRepoRoot]);
+  }, [settings, appendLog, toast, validateRepoRoot, blockOnRuntimeMismatch]);
 
   const runSplit = useCallback(async () => {
+    if (blockOnRuntimeMismatch()) return;
     if (!validateRepoRoot()) return;
 
     await runExclusive("split", async () => {
@@ -468,9 +530,10 @@ export default function App() {
       }
       setTaskState("idle");
     });
-  }, [settings, clearLogs, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive]);
+  }, [settings, clearLogs, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive, blockOnRuntimeMismatch]);
 
   const runTranslate = useCallback(async () => {
+    if (blockOnRuntimeMismatch()) return;
     if (!validateRepoRoot()) return;
 
     await runExclusive("translate all", async () => {
@@ -522,9 +585,10 @@ export default function App() {
       }
       setTaskState("idle");
     });
-  }, [settings, appendLog, refreshStatus, currentModel, toast, validateRepoRoot, runExclusive]);
+  }, [settings, appendLog, refreshStatus, currentModel, toast, validateRepoRoot, runExclusive, blockOnRuntimeMismatch]);
 
   const runTranslateNext = useCallback(async () => {
+    if (blockOnRuntimeMismatch()) return;
     if (!validateRepoRoot()) return;
 
     await runExclusive("translate next", async () => {
@@ -570,10 +634,11 @@ export default function App() {
       }
       setTaskState("idle");
     });
-  }, [settings, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive]);
+  }, [settings, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive, blockOnRuntimeMismatch]);
 
   const runTranslateChapter = useCallback(
     async (chapterIndex: number) => {
+      if (blockOnRuntimeMismatch()) return;
       if (!validateRepoRoot()) return;
 
       await runExclusive(`translate chapter ${chapterIndex}`, async () => {
@@ -620,7 +685,7 @@ export default function App() {
         }
       });
     },
-    [settings, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive],
+    [settings, appendLog, refreshStatus, toast, validateRepoRoot, runExclusive, blockOnRuntimeMismatch],
   );
 
   const stopTask = useCallback(async () => {
@@ -660,7 +725,13 @@ export default function App() {
   // ---- Render ----
   return (
     <div className="flex h-screen flex-col">
-      <AppHeader currentModel={currentModel} />
+      <AppHeader
+        currentModel={currentModel}
+        frontendHead={FRONTEND_BUILD_GIT_SHORT_HEAD}
+        runtimeHead={runtimeContext?.gitShortHead ?? null}
+        runtimeRepoRoot={runtimeContext?.repoRoot ?? null}
+        mismatch={hasRuntimeMismatch}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel: health + settings + actions + command preview */}
@@ -691,8 +762,8 @@ export default function App() {
             <CardContent className="p-3">
               <ActionPanel
                 taskState={taskState}
-                canSplit={health?.canSplit === true}
-                canTranslate={health?.canTranslate === true}
+                canSplit={health?.canSplit === true && !hasRuntimeMismatch}
+                canTranslate={health?.canTranslate === true && !hasRuntimeMismatch}
                 onSaveConfig={saveConfig}
                 onSplit={runSplit}
                 onRefresh={refreshStatus}
@@ -716,6 +787,23 @@ export default function App() {
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.22, ease: "easeOut" }}
         >
+          {runtimeMismatch && (
+            <Card className="border-red-500/60 bg-red-500/10">
+              <CardHeader className="p-3 pb-1">
+                <CardTitle className="text-sm text-red-500">
+                  UI/Repo 版本不一致
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 text-xs text-red-500 space-y-1">
+                <div>UI: {FRONTEND_BUILD_GIT_SHORT_HEAD}</div>
+                <div>Repo: {runtimeContext?.gitShortHead ?? "unknown"}</div>
+                <div>UI Root: {FRONTEND_BUILD_REPO_ROOT}</div>
+                <div>Runtime Root: {runtimeContext?.repoRoot ?? "unknown"}</div>
+                <div>请关闭窗口后从当前仓库根目录重新运行 run_youshengshu.bat。</div>
+              </CardContent>
+            </Card>
+          )}
+
           <StatusCards status={status} currentModel={currentModel} />
 
           <Card className="flex-1 flex flex-col min-h-0">
@@ -727,6 +815,7 @@ export default function App() {
                 chapters={status?.chapters ?? []}
                 onTranslateChapter={runTranslateChapter}
                 disabled={
+                  hasRuntimeMismatch ||
                   taskState === "translating" ||
                   taskState === "splitting" ||
                   taskState === "refreshing"

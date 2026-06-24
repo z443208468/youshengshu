@@ -25,6 +25,16 @@ export interface AppContext {
   isValidRepoRoot: boolean;
   detectedFrom: string;
   cliPath: string;
+  gitHead: string;
+  gitShortHead: string;
+  gitBranch: string;
+}
+
+export interface RuntimeMismatch {
+  frontendHead: string;
+  runtimeHead: string;
+  frontendRepoRoot: string;
+  runtimeRepoRoot: string;
 }
 
 export interface CheckResult {

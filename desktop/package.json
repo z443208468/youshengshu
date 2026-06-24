@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/write-build-info.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/write-build-info.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

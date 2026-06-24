@@ -262,4 +262,50 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - Resume after failed batch: PASS (unit test)
 - cn output path correct: PASS
 - en dir pollution check: NOT RUN (manual)
-- LOCAL_HEAD == REMOTE_HEAD: PENDING (after push)
+- LOCAL_HEAD == REMOTE_HEAD: PASS (1e2e98e)
+
+## Runtime Frontend Consistency Fix
+
+### Build Info
+
+- Added desktop/scripts/write-build-info.mjs: PASS
+- Added desktop/src/generated/buildInfo.ts: PASS
+- package.json predev writes build info: PASS
+- package.json prebuild writes build info: PASS
+- frontend bundle git head displayed in AppHeader: PASS
+
+### Runtime Repo Info
+
+- Tauri AppContext exposes git_head: PASS
+- Tauri AppContext exposes git_short_head: PASS
+- Tauri AppContext exposes git_branch: PASS
+- App compares frontend build head with runtime repo head: PASS
+- UI blocks actions on mismatch: PASS
+
+### Startup Preflight
+
+- Added scripts/windows/preflight-runtime.ps1: PASS
+- preflight reads devUrl from tauri.conf.json: PASS (UTF-8 regex parse)
+- preflight checks port ownership: PASS
+- preflight kills only repo-owned stale dev server: PASS
+- preflight refuses non-repo owner on dev port: PASS (logic in script)
+- run_youshengshu.bat invokes preflight before tauri dev: PASS
+
+### UI Verification
+
+- AppHeader shows UI head: PASS
+- AppHeader shows Repo head: PASS
+- mismatch warning panel appears when heads differ: PASS (code)
+- ActionPanel disabled on mismatch: PASS
+- ChapterTable row actions disabled on mismatch: PASS
+
+### Verification
+
+- powershell preflight dry run: PASS
+- npm run build: PASS
+- cargo test: PASS (8 passed)
+- dev_check.bat: PASS
+- manual cold start shows UI head == Repo head: NOT RUN
+- manual cold start shows "连续翻译待处理章节": NOT RUN
+- manual cold start shows ChapterTable 操作列: NOT RUN
+- LOCAL_HEAD == REMOTE_HEAD: PENDING

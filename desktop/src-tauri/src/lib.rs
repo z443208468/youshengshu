@@ -50,6 +50,9 @@ struct AppContext {
     is_valid_repo_root: bool,
     detected_from: String,
     cli_path: String,
+    git_head: String,
+    git_short_head: String,
+    git_branch: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -285,6 +288,24 @@ fn write_log_line(file: &mut std::fs::File, stream: &str, line: &str) {
     let _ = writeln!(file, "[{}][{}] {}", timestamp, stream, line);
 }
 
+fn git_output(repo_root: &std::path::Path, args: &[&str]) -> String {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Command: resolve_app_context
 // ---------------------------------------------------------------------------
@@ -297,6 +318,10 @@ fn resolve_app_context() -> Result<AppContext, String> {
     let cli_path = repo_root.join("src").join("youshengshu").join("cli.py");
     let python_cmd = default_python_command(&repo_root);
 
+    let git_head = git_output(&repo_root, &["rev-parse", "HEAD"]);
+    let git_short_head = git_output(&repo_root, &["rev-parse", "--short", "HEAD"]);
+    let git_branch = git_output(&repo_root, &["rev-parse", "--abbrev-ref", "HEAD"]);
+
     Ok(AppContext {
         repo_root: repo_root.to_string_lossy().to_string(),
         config_path: "config/default_config.json".to_string(),
@@ -304,6 +329,9 @@ fn resolve_app_context() -> Result<AppContext, String> {
         is_valid_repo_root: true,
         detected_from: detect_source(),
         cli_path: cli_path.to_string_lossy().to_string(),
+        git_head,
+        git_short_head,
+        git_branch,
     })
 }
 
@@ -1040,6 +1068,18 @@ mod tests {
 
         assert!(spec.args.contains(&"--max-chapters".to_string()));
         assert!(spec.args.contains(&"--chapter-index".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn git_output_returns_unknown_for_invalid_repo() {
+        let dir = std::env::temp_dir().join("yss_not_git_repo");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let result = git_output(&dir, &["rev-parse", "--short", "HEAD"]);
+        assert_eq!(result, "unknown");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

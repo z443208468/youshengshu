@@ -142,10 +142,43 @@ if errorlevel 1 exit /b 1
 call :assert_no_grep "作为 AI" "src/youshengshu"
 if errorlevel 1 exit /b 1
 
+echo [CHECK] Runtime preflight dry run
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%scripts\windows\preflight-runtime.ps1" -RepoRoot "%REPO_ROOT%." -DryRun
+if errorlevel 1 exit /b 1
+
 echo [CHECK] Frontend build
 cd /d "%REPO_ROOT%desktop"
 npm run build
 if errorlevel 1 exit /b 1
+
+if not exist "%REPO_ROOT%desktop\src\generated\buildInfo.ts" (
+  echo [ERROR] buildInfo.ts not generated
+  exit /b 1
+)
+
+findstr /C:"FRONTEND_BUILD_GIT_SHORT_HEAD" "%REPO_ROOT%desktop\src\generated\buildInfo.ts" >nul
+if errorlevel 1 (
+  echo [ERROR] buildInfo.ts missing FRONTEND_BUILD_GIT_SHORT_HEAD
+  exit /b 1
+)
+
+git grep "FRONTEND_BUILD_GIT_SHORT_HEAD" -- desktop/src >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] frontend build head is not displayed or imported
+  exit /b 1
+)
+
+git grep "git_short_head" -- desktop/src-tauri >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] runtime git_short_head is not exposed by Tauri
+  exit /b 1
+)
+
+git grep "preflight-runtime.ps1" -- run_youshengshu.bat scripts >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] runtime preflight script is not wired
+  exit /b 1
+)
 
 echo [CHECK] Rust cargo check
 call "%REPO_ROOT%setup_msvc_env.bat"
