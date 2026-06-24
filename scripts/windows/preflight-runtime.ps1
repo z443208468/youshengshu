@@ -75,10 +75,27 @@ foreach ($conn in $listeners) {
   }
 }
 
+function Test-IsStaleTauriProcess([object]$proc) {
+  $name = [string]$proc.Name
+  $exeNorm = Normalize-PathString([string]$proc.ExecutablePath)
+
+  if ($name -like "*有声书翻译工坊*") { return $true }
+  if ($exeNorm -like "*\youshengshu-desktop.exe") { return $true }
+  if ($exeNorm -like "*\youshengshu_desktop.exe") { return $true }
+  if ($exeNorm -like "*\target\debug\deps\youshengshu_desktop*.exe") { return $true }
+  if ($exeNorm -like "*\target\release\youshengshu*.exe") { return $true }
+  return $false
+}
+
 # 2. Kill stale Tauri binary only if executable path is under this repo target dir.
+$selfPid = $PID
+$parentProc = Get-CimInstance Win32_Process -Filter "ProcessId=$selfPid" -ErrorAction SilentlyContinue
+$parentPid = if ($parentProc) { [int]$parentProc.ParentProcessId } else { -1 }
+
 $tauriProcs = @(Get-CimInstance Win32_Process | Where-Object {
-  ($_.Name -like "*有声书翻译工坊*") -or
-  ($_.CommandLine -like "*youshengshu*")
+  $_.ProcessId -ne $selfPid -and
+  $_.ProcessId -ne $parentPid -and
+  (Test-IsStaleTauriProcess $_)
 })
 
 foreach ($proc in $tauriProcs) {
