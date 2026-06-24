@@ -27,6 +27,7 @@ class CosyVoiceHttpConfig:
     prompt_text: str = ""
     prompt_audio_path: str = ""
     instruct_text: str = ""
+    model_profile: str = "cosyvoice_300m_sft"
     request_timeout_seconds: int = 120
     max_retries: int = 2
     retry_sleep_seconds: int = 2

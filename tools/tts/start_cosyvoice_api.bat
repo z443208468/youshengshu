@@ -1,4 +1,6 @@
 @echo off
+echo [INFO] This script is diagnostic only.
+echo [INFO] The TTS Workbench starts CosyVoice automatically.
 setlocal
 
 set REPO_ROOT=%~dp0..\..
@@ -8,7 +10,7 @@ set COSYVOICE_ROOT=%REPO_ROOT%\third_party\tts\CosyVoice
 set FASTAPI_DIR=%COSYVOICE_ROOT%\runtime\python\fastapi
 
 if "%PYTHON_CMD%"=="" set PYTHON_CMD=python
-if "%COSYVOICE_MODEL_DIR%"=="" set COSYVOICE_MODEL_DIR=%COSYVOICE_ROOT%\pretrained_models\CosyVoice-300M
+if "%COSYVOICE_MODEL_DIR%"=="" set COSYVOICE_MODEL_DIR=%COSYVOICE_ROOT%\pretrained_models\CosyVoice-300M-SFT
 
 if not exist "%FASTAPI_DIR%\server.py" (
   echo [ERROR] CosyVoice FastAPI server.py not found: "%FASTAPI_DIR%\server.py"

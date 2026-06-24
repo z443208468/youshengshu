@@ -375,6 +375,39 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - third_party/tts is gitignored: PASS
 - model files are not committed: PASS
 
+### CosyVoice Runtime Bootstrap Verification
+
+- third_party/tts is ignored by git and runtime manager handles local install: PASS
+- check_cosyvoice_runtime returns missing repo/model/venv when absent: PASS
+- bootstrap_cosyvoice_runtime clones CosyVoice recursively: PASS
+- bootstrap_cosyvoice_runtime updates submodules: PASS
+- bootstrap_cosyvoice_runtime creates isolated third_party/tts/.cosyvoice_venv: PASS
+- bootstrap_cosyvoice_runtime installs CosyVoice requirements into isolated venv: PASS
+- bootstrap_cosyvoice_runtime downloads CosyVoice-300M-SFT: PASS
+- start_cosyvoice_service refuses to start when runtime not ready: PASS
+- start_cosyvoice_service uses isolated venv python, not app python_command: PASS
+- TTS Workbench calls check -> bootstrap -> recheck -> start -> poll /docs: PASS
+- TTS Workbench no longer surfaces raw server.py missing as final user action: PASS
+- clone_cosyvoice.bat and start_cosyvoice_api.bat are diagnostic only: PASS
+- bootstrapCosyVoiceRuntime no longer receives app pythonCommand as CosyVoice venv creator: PASS
+- Windows CosyVoice venv creation uses py -3.10: PASS
+- wrong-version .cosyvoice_venv is deleted and recreated: PASS
+- bootstrap ProcessOutput.code is checked by TtsWorkbench before recheck/start: PASS
+- model completeness uses has_model_files, not only directory existence: PASS
+- incomplete model directory is removed and redownloaded: PASS
+- requirements install is guarded by .yss_requirements_sha256 and import probe: PASS
+- Existing non-git third_party/tts/CosyVoice is quarantined automatically: PASS
+- CosyVoice repo with missing runtime/python/fastapi/server.py is quarantined and recloned once: PASS
+- bootstrap no longer emits "Remove it or rename it before bootstrap": PASS
+- dev_check uses git grep -F -e for --bootstrap-python: PASS
+- dev_check checks exact return ["py", "-3.10"] string: PASS
+- ActiveCosyVoiceBootstrap is registered with Tauri .manage: PASS
+- check_cosyvoice_runtime is registered in invoke_handler: PASS
+- bootstrap_cosyvoice_runtime is registered in invoke_handler: PASS
+- kill_cosyvoice_bootstrap is registered in invoke_handler: PASS
+- kill_cosyvoice_bootstrap takes child out of mutex before await kill: PASS
+- ModelScope fallback resets HuggingFace partial target dir before retry: PASS
+
 ### Verification
 
 - python -m pytest -q: PASS (72 passed)

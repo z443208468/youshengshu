@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import type {
+  CosyVoiceRuntimeStatus,
   TtsChapterRow,
   TtsServiceStatus,
   TtsSettings,
@@ -10,6 +11,8 @@ import type {
   TtsTaskState,
 } from "../../types/app";
 import {
+  bootstrapCosyVoiceRuntime,
+  checkCosyVoiceRuntime,
   killTtsProcess,
   resolvePath,
   runTtsCli,
@@ -59,6 +62,9 @@ export function TtsWorkbench({
   const [taskState, setTaskState] = useState<TtsTaskState>("idle");
   const [serviceStatus, setServiceStatus] = useState<TtsServiceStatus>("unchecked");
   const [serviceError, setServiceError] = useState<string | null>(null);
+  const [cosyVoiceRuntime, setCosyVoiceRuntime] =
+    useState<CosyVoiceRuntimeStatus | null>(null);
+  void cosyVoiceRuntime;
   const [ttsStatus, setTtsStatus] = useState<TtsStatusPayload | null>(null);
   const [ttsLogs, setTtsLogs] = useState<string[]>([]);
 
@@ -102,6 +108,7 @@ export function TtsWorkbench({
         prompt_text: settings.promptText,
         prompt_audio_path: promptAudioPath,
         instruct_text: settings.instructText,
+        model_profile: "cosyvoice_300m_sft",
         request_timeout_seconds: 120,
         max_retries: 2,
         retry_sleep_seconds: 2,
@@ -292,21 +299,64 @@ export function TtsWorkbench({
     }
   }
 
-  async function ensureCosyVoiceServiceReady() {
-    setServiceStatus("checking");
+  async function ensureCosyVoiceRuntimeAndServiceReady() {
+    setServiceStatus("checking_runtime");
     setServiceError(null);
-    appendTtsLog("正在检查 CosyVoice 服务。");
+    appendTtsLog("正在检查 CosyVoice 运行环境。");
+
+    let runtime = await checkCosyVoiceRuntime(ttsSettings.repoRoot);
+    setCosyVoiceRuntime(runtime);
+
+    if (!runtime.ready) {
+      setServiceStatus("bootstrapping_runtime");
+      appendTtsLog(`CosyVoice 运行环境缺失: ${runtime.missing.join(", ")}`);
+      appendTtsLog("开始自动安装 CosyVoice 运行环境。");
+
+      try {
+        const bootstrapOutput = await bootstrapCosyVoiceRuntime(ttsSettings.repoRoot);
+
+        if (bootstrapOutput.code !== 0) {
+          throw new Error(
+            `CosyVoice runtime bootstrap failed with code ${bootstrapOutput.code}: ${
+              bootstrapOutput.stderr || bootstrapOutput.stdout || bootstrapOutput.commandLine
+            }`,
+          );
+        }
+      } catch (error) {
+        const message = errorToMessage(error);
+        setServiceStatus("error");
+        setServiceError(message);
+        appendTtsLog(`CosyVoice 运行环境自动安装失败: ${message}`);
+        return;
+      }
+
+      runtime = await checkCosyVoiceRuntime(ttsSettings.repoRoot);
+      setCosyVoiceRuntime(runtime);
+
+      if (!runtime.ready) {
+        const message = `CosyVoice 运行环境安装后仍不完整: ${runtime.missing.join(", ")}`;
+        setServiceStatus("error");
+        setServiceError(message);
+        appendTtsLog(message);
+        return;
+      }
+
+      appendTtsLog("CosyVoice 运行环境已准备完成。");
+    }
+
+    setServiceStatus("checking");
+    appendTtsLog("正在检查 CosyVoice FastAPI 服务。");
 
     const alreadyConnected = await checkCosyVoiceDocs();
 
     if (alreadyConnected) {
       setServiceStatus("connected");
-      appendTtsLog("CosyVoice 服务已连接。");
+      appendTtsLog("CosyVoice FastAPI 服务已连接。");
       return;
     }
 
     setServiceStatus("starting");
-    appendTtsLog("CosyVoice 服务未连接，开始自动启动 runtime/python/fastapi/server.py。");
+    appendTtsLog("CosyVoice FastAPI 服务未连接，开始自动启动。");
 
     try {
       await startCosyVoiceService(ttsSettings.repoRoot, pythonCommand);
@@ -314,12 +364,12 @@ export function TtsWorkbench({
       const message = errorToMessage(error);
       setServiceStatus("error");
       setServiceError(message);
-      appendTtsLog(`CosyVoice 服务自动启动失败: ${message}`);
+      appendTtsLog(`CosyVoice FastAPI 服务自动启动失败: ${message}`);
       return;
     }
 
-    for (let attempt = 1; attempt <= 30; attempt += 1) {
-      appendTtsLog(`等待 CosyVoice 服务启动: ${attempt}/30`);
+    for (let attempt = 1; attempt <= 180; attempt += 1) {
+      appendTtsLog(`等待 CosyVoice FastAPI 服务启动: ${attempt}/180`);
       await sleep(1000);
 
       const connected = await checkCosyVoiceDocs();
@@ -327,23 +377,23 @@ export function TtsWorkbench({
       if (connected) {
         setServiceStatus("connected");
         setServiceError(null);
-        appendTtsLog("CosyVoice 服务已自动启动并连接。");
+        appendTtsLog("CosyVoice FastAPI 服务已自动启动并连接。");
         return;
       }
     }
 
-    const message = "CosyVoice 服务启动超时，30 秒内未连通 /docs。";
+    const message = "CosyVoice FastAPI 服务启动超时，180 秒内未连通 /docs。";
     setServiceStatus("error");
     setServiceError(message);
     appendTtsLog(message);
   }
 
   useEffect(() => {
-    void ensureCosyVoiceServiceReady();
+    void ensureCosyVoiceRuntimeAndServiceReady();
   }, []);
 
   async function handleCheckService() {
-    await ensureCosyVoiceServiceReady();
+    await ensureCosyVoiceRuntimeAndServiceReady();
   }
 
   async function handlePickSource() {

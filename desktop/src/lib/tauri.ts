@@ -115,6 +115,40 @@ export async function killTtsProcess(): Promise<void> {
   return invoke<void>("kill_tts_process");
 }
 
+export interface CosyVoiceRuntimeStatus {
+  repoRoot: string;
+  cosyvoiceDir: string;
+  fastapiServerPath: string;
+  venvPython: string;
+  modelDir: string;
+  repoExists: boolean;
+  gitExists: boolean;
+  fastapiServerExists: boolean;
+  venvPythonExists: boolean;
+  modelDirExists: boolean;
+  modelFilesExist: boolean;
+  ready: boolean;
+  missing: string[];
+}
+
+export async function checkCosyVoiceRuntime(
+  repoRoot: string,
+): Promise<CosyVoiceRuntimeStatus> {
+  return invoke<CosyVoiceRuntimeStatus>("check_cosyvoice_runtime", { repoRoot });
+}
+
+export async function bootstrapCosyVoiceRuntime(
+  repoRoot: string,
+): Promise<ProcessOutput> {
+  return invoke<ProcessOutput>("bootstrap_cosyvoice_runtime", {
+    repoRoot,
+  });
+}
+
+export async function killCosyVoiceBootstrap(): Promise<void> {
+  return invoke<void>("kill_cosyvoice_bootstrap");
+}
+
 export async function startCosyVoiceService(
   repoRoot: string,
   pythonCommand: string,

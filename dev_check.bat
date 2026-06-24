@@ -329,9 +329,171 @@ if errorlevel 1 (
   exit /b 1
 )
 
-git grep "ensureCosyVoiceServiceReady" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+git grep "ensureCosyVoiceRuntimeAndServiceReady" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] TTS page must auto ensure CosyVoice service
+  echo [ERROR] TTS must bootstrap runtime before service start
+  exit /b 1
+)
+
+git grep "check_cosyvoice_runtime" -- desktop/src-tauri/src/lib.rs desktop/src/lib/tauri.ts src/youshengshu_tts tests >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice runtime check missing
+  exit /b 1
+)
+
+git grep "bootstrap_cosyvoice_runtime" -- desktop/src-tauri/src/lib.rs desktop/src/lib/tauri.ts tools/tts desktop/src/features/tts >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice runtime bootstrap missing
+  exit /b 1
+)
+
+git grep "CosyVoice-300M-SFT" -- desktop src tools tests >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Default CosyVoice model must be CosyVoice-300M-SFT
+  exit /b 1
+)
+
+git grep "runtime not ready" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] start_cosyvoice_service must reject missing runtime
+  exit /b 1
+)
+
+git grep "Command::new(&python_command)" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] CosyVoice service must not use app python_command directly
+  exit /b 1
+)
+
+git grep "third_party/tts/.cosyvoice_venv" -- desktop src tools tests >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice isolated venv path missing
+  exit /b 1
+)
+
+git grep "clone_cosyvoice.bat" -- desktop/src-tauri/src/lib.rs desktop/src/features/tts desktop/src/lib/tauri.ts >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] App must not call manual clone script
+  exit /b 1
+)
+
+git grep "start_cosyvoice_api.bat" -- desktop/src-tauri/src/lib.rs desktop/src/features/tts desktop/src/lib/tauri.ts >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] App must not call manual start script
+  exit /b 1
+)
+
+git grep "bootstrapCosyVoiceRuntime(ttsSettings.repoRoot, pythonCommand)" -- desktop/src/features/tts >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] TTS must not pass app pythonCommand as CosyVoice bootstrap python
+  exit /b 1
+)
+
+git grep -F -e "--bootstrap-python" -- desktop/src-tauri/src/lib.rs desktop/src/lib/tauri.ts desktop/src/features/tts >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] Rust/UI bridge must not pass --bootstrap-python
+  exit /b 1
+)
+
+git grep -F -e "return [\"py\", \"-3.10\"]" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Windows CosyVoice venv creation must use py -3.10
+  exit /b 1
+)
+
+git grep "bootstrapOutput.code" -- desktop/src/features/tts/TtsWorkbench.tsx 2>nul | findstr !== >nul
+if errorlevel 1 (
+  echo [ERROR] TtsWorkbench must reject failed bootstrap ProcessOutput
+  exit /b 1
+)
+
+git grep "has_model_files" -- src/youshengshu_tts/runtime.py tools/tts/download_cosyvoice_model.py tests >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice model completeness check missing
+  exit /b 1
+)
+
+git grep "model_files_exist" -- src/youshengshu_tts/runtime.py desktop/src-tauri/src/lib.rs desktop/src/lib/tauri.ts desktop/src/types/app.ts >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Runtime status must expose model_files_exist
+  exit /b 1
+)
+
+git grep ".yss_requirements_sha256" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice requirements install marker missing
+  exit /b 1
+)
+
+git grep "shutil.rmtree(venv_dir)" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Wrong-version CosyVoice venv must be recreated
+  exit /b 1
+)
+
+git grep "shutil.rmtree(target_dir)" -- tools/tts/download_cosyvoice_model.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Incomplete model dir must be removed before redownload
+  exit /b 1
+)
+
+git grep -F -e "quarantine_path" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must quarantine invalid CosyVoice directories
+  exit /b 1
+)
+
+git grep -F -e "not_git_repo" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must handle existing non-git CosyVoice dir
+  exit /b 1
+)
+
+git grep -F -e "missing_fastapi_server" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must repair CosyVoice repo when FastAPI server.py is missing
+  exit /b 1
+)
+
+git grep -F -e "Remove it or rename it before bootstrap" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] bootstrap must not ask user to manually remove CosyVoice dir
+  exit /b 1
+)
+
+git grep -F -e "ActiveCosyVoiceBootstrap(Mutex::new(None))" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] ActiveCosyVoiceBootstrap must be registered with .manage
+  exit /b 1
+)
+
+git grep -F -e "check_cosyvoice_runtime," -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] check_cosyvoice_runtime must be registered in invoke_handler
+  exit /b 1
+)
+
+git grep -F -e "bootstrap_cosyvoice_runtime," -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap_cosyvoice_runtime must be registered in invoke_handler
+  exit /b 1
+)
+
+git grep -F -e "kill_cosyvoice_bootstrap," -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] kill_cosyvoice_bootstrap must be registered in invoke_handler
+  exit /b 1
+)
+
+git grep -F -e "clear_active_cosyvoice_bootstrap" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] clear_active_cosyvoice_bootstrap helper missing
+  exit /b 1
+)
+
+git grep -F -e "reset_target_dir(target_dir)" -- tools/tts/download_cosyvoice_model.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] ModelScope fallback must reset HuggingFace partial download directory
   exit /b 1
 )
 
@@ -407,7 +569,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-git grep "const busy = status === \"checking\" || status === \"starting\"" -- desktop/src/features/tts/TtsServiceStatusCard.tsx >nul 2>nul
+git grep "checking_runtime" -- desktop/src/features/tts/TtsServiceStatusCard.tsx >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] TtsServiceStatusCard must disable button while checking or starting
   exit /b 1

@@ -1,4 +1,7 @@
 @echo off
+echo [INFO] This script is diagnostic only.
+echo [INFO] The TTS Workbench now bootstraps CosyVoice automatically.
+echo [INFO] Running manual clone for debugging...
 setlocal
 set REPO_ROOT=%~dp0..\..
 cd /d "%REPO_ROOT%"

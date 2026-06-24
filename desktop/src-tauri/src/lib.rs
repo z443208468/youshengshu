@@ -70,9 +70,28 @@ enum ActiveTask {
 
 struct ActiveProcess(Mutex<Option<ActiveTask>>);
 struct ActiveTtsProcess(Mutex<Option<ActiveTask>>);
+struct ActiveCosyVoiceBootstrap(Mutex<Option<ActiveTask>>);
 
 struct ActiveCosyVoiceProcess {
     child: std::sync::Mutex<Option<std::process::Child>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CosyVoiceRuntimeStatus {
+    repo_root: String,
+    cosyvoice_dir: String,
+    fastapi_server_path: String,
+    venv_python: String,
+    model_dir: String,
+    repo_exists: bool,
+    git_exists: bool,
+    fastapi_server_exists: bool,
+    venv_python_exists: bool,
+    model_dir_exists: bool,
+    model_files_exist: bool,
+    ready: bool,
+    missing: Vec<String>,
 }
 
 fn clear_active_task(state: &tauri::State<'_, ActiveProcess>) {
@@ -83,6 +102,71 @@ fn clear_active_task(state: &tauri::State<'_, ActiveProcess>) {
 fn clear_active_tts_task(state: &tauri::State<'_, ActiveTtsProcess>) {
     let mut guard = state.0.lock().unwrap();
     *guard = None;
+}
+
+fn clear_active_cosyvoice_bootstrap(state: &tauri::State<'_, ActiveCosyVoiceBootstrap>) {
+    let mut guard = state.0.lock().unwrap();
+    *guard = None;
+}
+
+fn cosyvoice_model_files_exist(model_dir: &std::path::Path) -> bool {
+    if !model_dir.exists() {
+        return false;
+    }
+
+    let has_config = model_dir.join("cosyvoice.yaml").exists()
+        || model_dir.join("config.yaml").exists();
+
+    let mut has_weight = false;
+    let mut stack = vec![model_dir.to_path_buf()];
+
+    while let Some(path) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if let Some(ext) = p.extension().and_then(|value| value.to_str()) {
+                    let ext = ext.to_ascii_lowercase();
+                    if ext == "pt" || ext == "pth" || ext == "bin" || ext == "safetensors" {
+                        has_weight = true;
+                    }
+                }
+            }
+        }
+    }
+
+    has_config && has_weight
+}
+
+fn cosyvoice_paths(repo_root: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let root = std::path::PathBuf::from(repo_root);
+    let cosyvoice_dir = root.join("third_party").join("tts").join("CosyVoice");
+    let fastapi_server = cosyvoice_dir
+        .join("runtime")
+        .join("python")
+        .join("fastapi")
+        .join("server.py");
+
+    let venv_python = if cfg!(windows) {
+        root.join("third_party")
+            .join("tts")
+            .join(".cosyvoice_venv")
+            .join("Scripts")
+            .join("python.exe")
+    } else {
+        root.join("third_party")
+            .join("tts")
+            .join(".cosyvoice_venv")
+            .join("bin")
+            .join("python")
+    };
+
+    let model_dir = cosyvoice_dir
+        .join("pretrained_models")
+        .join("CosyVoice-300M-SFT");
+
+    (cosyvoice_dir, fastapi_server, venv_python, model_dir)
 }
 
 /// Persists UI log lines (config save, errors, etc.) for the app session.
@@ -1258,15 +1342,303 @@ async fn kill_tts_process(state: tauri::State<'_, ActiveTtsProcess>) -> Result<(
 }
 
 // ---------------------------------------------------------------------------
-// Command: start_cosyvoice_service / kill_cosyvoice_service
+// Command: CosyVoice runtime check / bootstrap / service
 // ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn check_cosyvoice_runtime(repo_root: String) -> Result<CosyVoiceRuntimeStatus, String> {
+    let (cosyvoice_dir, fastapi_server, venv_python, model_dir) = cosyvoice_paths(&repo_root);
+
+    let git_dir = cosyvoice_dir.join(".git");
+
+    let repo_exists = cosyvoice_dir.exists();
+    let git_exists = git_dir.exists();
+    let fastapi_server_exists = fastapi_server.exists();
+    let venv_python_exists = venv_python.exists();
+    let model_dir_exists = model_dir.exists();
+    let model_files_exist = cosyvoice_model_files_exist(&model_dir);
+
+    let mut missing = Vec::new();
+
+    if !repo_exists {
+        missing.push("cosyvoice_repo".to_string());
+    }
+    if !git_exists {
+        missing.push("cosyvoice_git".to_string());
+    }
+    if !fastapi_server_exists {
+        missing.push("fastapi_server".to_string());
+    }
+    if !venv_python_exists {
+        missing.push("cosyvoice_venv".to_string());
+    }
+    if !model_files_exist {
+        missing.push("cosyvoice_model".to_string());
+    }
+
+    Ok(CosyVoiceRuntimeStatus {
+        repo_root,
+        cosyvoice_dir: cosyvoice_dir.to_string_lossy().to_string(),
+        fastapi_server_path: fastapi_server.to_string_lossy().to_string(),
+        venv_python: venv_python.to_string_lossy().to_string(),
+        model_dir: model_dir.to_string_lossy().to_string(),
+        repo_exists,
+        git_exists,
+        fastapi_server_exists,
+        venv_python_exists,
+        model_dir_exists,
+        model_files_exist,
+        ready: missing.is_empty(),
+        missing,
+    })
+}
+
+#[tauri::command]
+async fn bootstrap_cosyvoice_runtime(
+    app: tauri::AppHandle,
+    repo_root: String,
+    active: tauri::State<'_, ActiveCosyVoiceBootstrap>,
+) -> Result<ProcessOutput, String> {
+    if repo_root.trim().is_empty() {
+        return Err("项目根目录 repoRoot 为空".to_string());
+    }
+
+    {
+        let mut guard = active.0.lock().unwrap();
+        if guard.is_some() {
+            return Err("CosyVoice bootstrap already running".to_string());
+        }
+        *guard = Some(ActiveTask::Starting);
+    }
+
+    let repo_root_path = std::path::PathBuf::from(&repo_root);
+    let script_path = repo_root_path
+        .join("tools")
+        .join("tts")
+        .join("bootstrap_cosyvoice_runtime.py");
+
+    if !script_path.exists() {
+        clear_active_cosyvoice_bootstrap(&active);
+        return Err(format!(
+            "bootstrap script missing: {}",
+            script_path.display()
+        ));
+    }
+
+    let script_python = default_python_command(&repo_root_path);
+    let pythonpath = repo_root_path.join("src");
+    let command_line = format!(
+        "{} {} --repo-root {} --model-profile cosyvoice_300m_sft --json-lines",
+        script_python,
+        script_path.display(),
+        repo_root
+    );
+
+    let started_at = iso_now();
+    let opened_log = match open_log_file(&repo_root_path) {
+        Ok(opened) => opened,
+        Err(e) => {
+            clear_active_cosyvoice_bootstrap(&active);
+            return Err(e);
+        }
+    };
+    let log_file_path = opened_log.path.to_string_lossy().to_string();
+    let log_file = std::sync::Arc::new(std::sync::Mutex::new(opened_log.file));
+    write_log_line(
+        &mut *log_file.lock().unwrap(),
+        "system",
+        &format!("Working directory: {}", repo_root),
+    );
+    write_log_line(
+        &mut *log_file.lock().unwrap(),
+        "system",
+        &format!("Command: {}", command_line),
+    );
+
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: format!("Working directory: {}", repo_root),
+        },
+    );
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: format!("Command: {}", command_line),
+        },
+    );
+
+    let mut cmd = Command::new(&script_python);
+    cmd.current_dir(&repo_root_path);
+    cmd.env("PYTHONIOENCODING", "utf-8");
+    cmd.env("PYTHONUTF8", "1");
+    cmd.env("PYTHONUNBUFFERED", "1");
+    let pythonpath_val = pythonpath.to_string_lossy().to_string();
+    if let Ok(old) = std::env::var("PYTHONPATH") {
+        if !old.trim().is_empty() {
+            cmd.env("PYTHONPATH", format!("{};{}", pythonpath_val, old));
+        } else {
+            cmd.env("PYTHONPATH", &pythonpath_val);
+        }
+    } else {
+        cmd.env("PYTHONPATH", &pythonpath_val);
+    }
+    cmd.arg(&script_path);
+    cmd.arg("--repo-root").arg(&repo_root);
+    cmd.arg("--model-profile").arg("cosyvoice_300m_sft");
+    cmd.arg("--json-lines");
+
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            clear_active_cosyvoice_bootstrap(&active);
+            format!("启动 CosyVoice bootstrap 失败: {e}")
+        })?;
+
+    let stdout_handle = child
+        .stdout
+        .take()
+        .ok_or_else(|| "无法获取 stdout".to_string())?;
+    let stderr_handle = child
+        .stderr
+        .take()
+        .ok_or_else(|| "无法获取 stderr".to_string())?;
+
+    {
+        let mut guard = active.0.lock().unwrap();
+        *guard = Some(ActiveTask::Running(child));
+    }
+
+    let app_handle = app.clone();
+    let log_file_clone = log_file.clone();
+    let stdout_reader = tokio::spawn(async move {
+        let reader = tokio::io::BufReader::new(stdout_handle);
+        let mut lines = reader.lines();
+        let mut collected = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            collected.push_str(&line);
+            collected.push('\n');
+            write_log_line(&mut *log_file_clone.lock().unwrap(), "stdout", &line);
+            let _ = app_handle.emit(
+                LOG_EVENT_NAME,
+                LogPayload {
+                    stream: "stdout".to_string(),
+                    line: line.clone(),
+                },
+            );
+        }
+        collected
+    });
+
+    let app_handle2 = app.clone();
+    let log_file_clone2 = log_file.clone();
+    let stderr_reader = tokio::spawn(async move {
+        let reader = tokio::io::BufReader::new(stderr_handle);
+        let mut lines = reader.lines();
+        let mut collected = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            collected.push_str(&line);
+            collected.push('\n');
+            write_log_line(&mut *log_file_clone2.lock().unwrap(), "stderr", &line);
+            let _ = app_handle2.emit(
+                LOG_EVENT_NAME,
+                LogPayload {
+                    stream: "stderr".to_string(),
+                    line: line.clone(),
+                },
+            );
+        }
+        collected
+    });
+
+    let (stdout, stderr) = tokio::join!(stdout_reader, stderr_reader);
+    let stdout = stdout.unwrap_or_default();
+    let stderr = stderr.unwrap_or_default();
+
+    let mut child_to_wait = {
+        let mut guard = active.0.lock().unwrap();
+        match guard.take() {
+            Some(ActiveTask::Running(child)) => Some(child),
+            _ => None,
+        }
+    };
+    let status = if let Some(ref mut child) = child_to_wait {
+        child.wait().await.unwrap_or_default()
+    } else {
+        std::process::ExitStatus::default()
+    };
+    let code = status.code().unwrap_or(-1);
+    let finished_at = iso_now();
+
+    let summary = format!(
+        "CosyVoice bootstrap finished: code={}, stdout_len={}, stderr_len={}",
+        code,
+        stdout.len(),
+        stderr.len()
+    );
+    write_log_line(&mut *log_file.lock().unwrap(), "system", &summary);
+    let _ = app.emit(
+        LOG_EVENT_NAME,
+        LogPayload {
+            stream: "system".to_string(),
+            line: summary,
+        },
+    );
+
+    clear_active_cosyvoice_bootstrap(&active);
+
+    Ok(ProcessOutput {
+        code,
+        stdout,
+        stderr,
+        command_line,
+        started_at,
+        finished_at,
+        log_file_path,
+    })
+}
+
+#[tauri::command]
+async fn kill_cosyvoice_bootstrap(
+    active: tauri::State<'_, ActiveCosyVoiceBootstrap>,
+) -> Result<(), String> {
+    let child_to_kill = {
+        let mut guard = active.0.lock().unwrap();
+        match guard.take() {
+            Some(ActiveTask::Running(child)) => Some(child),
+            Some(ActiveTask::Starting) | None => None,
+        }
+    };
+
+    if let Some(mut child) = child_to_kill {
+        child
+            .kill()
+            .await
+            .map_err(|error| format!("终止 CosyVoice bootstrap 进程失败: {error}"))?;
+    }
+
+    Ok(())
+}
 
 #[tauri::command]
 fn start_cosyvoice_service(
     repo_root: String,
-    python_command: String,
+    _python_command: String,
     active: tauri::State<ActiveCosyVoiceProcess>,
 ) -> Result<(), String> {
+    let runtime = check_cosyvoice_runtime(repo_root.clone())?;
+
+    if !runtime.ready {
+        return Err(format!(
+            "CosyVoice runtime not ready; missing={:?}; call bootstrap_cosyvoice_runtime first",
+            runtime.missing
+        ));
+    }
+
     let mut guard = active
         .child
         .lock()
@@ -1285,33 +1657,15 @@ fn start_cosyvoice_service(
         }
     }
 
-    let cosyvoice_root = std::path::Path::new(&repo_root)
-        .join("third_party")
-        .join("tts")
-        .join("CosyVoice");
+    let fastapi_dir = std::path::PathBuf::from(&runtime.fastapi_server_path)
+        .parent()
+        .ok_or_else(|| "invalid fastapi server path".to_string())?
+        .to_path_buf();
 
-    let fastapi_dir = cosyvoice_root
-        .join("runtime")
-        .join("python")
-        .join("fastapi");
+    let cosyvoice_python = runtime.venv_python;
+    let model_dir = runtime.model_dir;
 
-    let server_py = fastapi_dir.join("server.py");
-
-    if !server_py.exists() {
-        return Err(format!(
-            "CosyVoice FastAPI server.py 不存在: {}",
-            server_py.display()
-        ));
-    }
-
-    let default_model_dir = cosyvoice_root
-        .join("pretrained_models")
-        .join("CosyVoice-300M");
-
-    let model_dir = std::env::var("COSYVOICE_MODEL_DIR")
-        .unwrap_or_else(|_| default_model_dir.display().to_string());
-
-    let child = std::process::Command::new(&python_command)
+    let child = std::process::Command::new(&cosyvoice_python)
         .arg("server.py")
         .arg("--port")
         .arg("50000")
@@ -1351,6 +1705,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(ActiveProcess(Mutex::new(None)))
         .manage(ActiveTtsProcess(Mutex::new(None)))
+        .manage(ActiveCosyVoiceBootstrap(Mutex::new(None)))
         .manage(ActiveCosyVoiceProcess {
             child: std::sync::Mutex::new(None),
         })
@@ -1367,6 +1722,9 @@ pub fn run() {
             kill_python_process,
             run_tts_cli,
             kill_tts_process,
+            check_cosyvoice_runtime,
+            bootstrap_cosyvoice_runtime,
+            kill_cosyvoice_bootstrap,
             start_cosyvoice_service,
             kill_cosyvoice_service,
         ])

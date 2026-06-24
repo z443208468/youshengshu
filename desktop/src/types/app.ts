@@ -134,11 +134,29 @@ export type TtsTaskState =
 
 export type TtsServiceStatus =
   | "unchecked"
+  | "checking_runtime"
+  | "bootstrapping_runtime"
   | "checking"
   | "starting"
   | "connected"
   | "disconnected"
   | "error";
+
+export interface CosyVoiceRuntimeStatus {
+  repoRoot: string;
+  cosyvoiceDir: string;
+  fastapiServerPath: string;
+  venvPython: string;
+  modelDir: string;
+  repoExists: boolean;
+  gitExists: boolean;
+  fastapiServerExists: boolean;
+  venvPythonExists: boolean;
+  modelDirExists: boolean;
+  modelFilesExist: boolean;
+  ready: boolean;
+  missing: string[];
+}
 
 export type TtsChapterStatus =
   | "pending"
