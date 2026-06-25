@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::process::Command as StdCommand;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
@@ -1345,6 +1347,213 @@ async fn kill_tts_process(state: tauri::State<'_, ActiveTtsProcess>) -> Result<(
 // Command: CosyVoice runtime check / bootstrap / service
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "windows")]
+fn find_processes_listening_on_port(port: u16) -> Result<Vec<u32>, String> {
+    let output = StdCommand::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .output()
+        .map_err(|error| format!("执行 netstat 失败: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "netstat 执行失败: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let port_suffix = format!(":{port}");
+    let mut pids = HashSet::new();
+
+    for line in stdout.lines() {
+        let normalized = line.split_whitespace().collect::<Vec<_>>();
+
+        if normalized.len() < 5 {
+            continue;
+        }
+
+        let protocol = normalized[0].to_ascii_lowercase();
+        let local_address = normalized[1];
+        let state = normalized[3].to_ascii_lowercase();
+        let pid_text = normalized[4];
+
+        if protocol != "tcp" {
+            continue;
+        }
+
+        if state != "listening" {
+            continue;
+        }
+
+        if !local_address.ends_with(&port_suffix) {
+            continue;
+        }
+
+        if let Ok(pid) = pid_text.parse::<u32>() {
+            pids.insert(pid);
+        }
+    }
+
+    Ok(pids.into_iter().collect())
+}
+
+#[cfg(target_os = "windows")]
+fn process_command_line(pid: u32) -> Result<String, String> {
+    let query = format!("processid={pid}");
+    let output = StdCommand::new("wmic")
+        .args(["process", "where", &query, "get", "CommandLine", "/value"])
+        .output()
+        .map_err(|error| format!("执行 wmic 查询 PID {pid} 失败: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "wmic 查询 PID {pid} 失败: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+
+        if let Some(command_line) = trimmed.strip_prefix("CommandLine=") {
+            return Ok(command_line.trim().to_string());
+        }
+    }
+
+    Ok(String::new())
+}
+
+#[cfg(target_os = "windows")]
+fn is_cosyvoice_fastapi_command(command_line: &str) -> bool {
+    let lower = command_line.to_ascii_lowercase();
+
+    lower.contains("cosyvoice")
+        && lower.contains("server.py")
+        && lower.contains("fastapi")
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process_tree(pid: u32) -> Result<(), String> {
+    let pid_text = pid.to_string();
+
+    let output = StdCommand::new("taskkill")
+        .args(["/PID", &pid_text, "/F", "/T"])
+        .output()
+        .map_err(|error| format!("执行 taskkill PID {pid} 失败: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "taskkill PID {pid} 失败: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn kill_stale_cosyvoice_server_on_port(port: u16) -> Result<(), String> {
+    let pids = find_processes_listening_on_port(port)?;
+
+    for pid in pids {
+        let command_line = process_command_line(pid)?;
+
+        if command_line.trim().is_empty() {
+            return Err(format!(
+                "端口 {port} 被 PID {pid} 占用，但无法读取 command line，禁止盲杀。"
+            ));
+        }
+
+        if !is_cosyvoice_fastapi_command(&command_line) {
+            return Err(format!(
+                "端口 {port} 被非 CosyVoice 进程占用，禁止盲杀。PID={pid}; command_line={command_line}"
+            ));
+        }
+
+        println!(
+            "[CosyVoice] killing stale server on port {port}: PID={pid}; command_line={command_line}"
+        );
+
+        kill_process_tree(pid)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_stale_cosyvoice_server_on_port(_port: u16) -> Result<(), String> {
+    Ok(())
+}
+
+fn kill_active_cosyvoice_child(
+    active: &tauri::State<'_, ActiveCosyVoiceProcess>,
+) -> Result<(), String> {
+    let mut guard = active
+        .child
+        .lock()
+        .map_err(|_| "CosyVoice process lock poisoned".to_string())?;
+
+    if let Some(child) = guard.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    *guard = None;
+    Ok(())
+}
+
+fn verify_cosyvoice_gpu_runtime_before_start(venv_python: &str) -> Result<(), String> {
+    let code = r#"
+import json
+import torch
+payload = {
+    "torch_version": torch.__version__,
+    "torch_cuda": torch.version.cuda,
+    "cuda_available": torch.cuda.is_available(),
+    "device_name": None,
+    "device_capability": None,
+    "arch_list": list(torch.cuda.get_arch_list()),
+    "cuda_kernel_ok": False,
+}
+if not torch.cuda.is_available():
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(10)
+payload["device_name"] = torch.cuda.get_device_name(0)
+major, minor = torch.cuda.get_device_capability(0)
+payload["device_capability"] = f"sm_{major}{minor}"
+x = torch.randn((128, 128), device="cuda")
+y = x @ x
+torch.cuda.synchronize()
+payload["cuda_kernel_ok"] = bool(y.is_cuda)
+print(json.dumps(payload, ensure_ascii=False))
+if not payload["cuda_kernel_ok"]:
+    raise SystemExit(11)
+"#;
+
+    let output = StdCommand::new(venv_python)
+        .arg("-c")
+        .arg(code)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .output()
+        .map_err(|error| format!("执行 CosyVoice GPU runtime probe 失败: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "CosyVoice GPU runtime probe failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        ));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn check_cosyvoice_runtime(repo_root: String) -> Result<CosyVoiceRuntimeStatus, String> {
     let (cosyvoice_dir, fastapi_server, venv_python, model_dir) = cosyvoice_paths(&repo_root);
@@ -1639,23 +1848,9 @@ fn start_cosyvoice_service(
         ));
     }
 
-    let mut guard = active
-        .child
-        .lock()
-        .map_err(|_| "CosyVoice process lock poisoned".to_string())?;
-
-    if let Some(child) = guard.as_mut() {
-        match child.try_wait() {
-            Ok(None) => return Ok(()),
-            Ok(Some(_status)) => {
-                *guard = None;
-            }
-            Err(error) => {
-                *guard = None;
-                return Err(format!("检查 CosyVoice 进程状态失败: {error}"));
-            }
-        }
-    }
+    kill_active_cosyvoice_child(&active)?;
+    kill_stale_cosyvoice_server_on_port(50000)?;
+    verify_cosyvoice_gpu_runtime_before_start(&runtime.venv_python)?;
 
     let fastapi_dir = std::path::PathBuf::from(&runtime.fastapi_server_path)
         .parent()
@@ -1665,15 +1860,27 @@ fn start_cosyvoice_service(
     let cosyvoice_python = runtime.venv_python;
     let model_dir = runtime.model_dir;
 
-    let child = std::process::Command::new(&cosyvoice_python)
+    let mut command = StdCommand::new(&cosyvoice_python);
+    command
         .arg("server.py")
         .arg("--port")
         .arg("50000")
         .arg("--model_dir")
         .arg(&model_dir)
         .current_dir(&fastapi_dir)
+        .env("YSS_COSYVOICE_BACKEND", "cuda")
+        .env("YSS_COSYVOICE_SELECTED_BACKEND", "cuda")
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8");
+
+    let child = command
         .spawn()
         .map_err(|error| format!("启动 CosyVoice FastAPI 服务失败: {error}"))?;
+
+    let mut guard = active
+        .child
+        .lock()
+        .map_err(|_| "CosyVoice process lock poisoned".to_string())?;
 
     *guard = Some(child);
     Ok(())
@@ -1681,17 +1888,7 @@ fn start_cosyvoice_service(
 
 #[tauri::command]
 fn kill_cosyvoice_service(active: tauri::State<ActiveCosyVoiceProcess>) -> Result<(), String> {
-    let mut guard = active
-        .child
-        .lock()
-        .map_err(|_| "CosyVoice process lock poisoned".to_string())?;
-
-    if let Some(child) = guard.as_mut() {
-        let _ = child.kill();
-    }
-
-    *guard = None;
-    Ok(())
+    kill_active_cosyvoice_child(&active)
 }
 
 // ---------------------------------------------------------------------------

@@ -782,6 +782,204 @@ echo [CHECK] Rust cargo test
 cargo test
 if errorlevel 1 exit /b 1
 
+git grep -F -e "cosyvoice_gpu_runtime.json" -- tools/tts/bootstrap_cosyvoice_runtime.py tools/tts/cosyvoice_gpu_runtime.json >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime manifest missing
+  exit /b 1
+)
+
+git grep -F -e "--index-url" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU torch install must use explicit CUDA index-url
+  exit /b 1
+)
+
+git grep -F -e "cu128" -- tools/tts/cosyvoice_gpu_runtime.json tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime must target CUDA 12.8 wheel index
+  exit /b 1
+)
+
+git grep -F -e "torch==2.11.*" -- tools/tts/cosyvoice_gpu_constraints.txt tools/tts/cosyvoice_gpu_runtime.json >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime must follow Ape-verified torch 2.11.x
+  exit /b 1
+)
+
+git grep -F -e "torchaudio==2.11.*" -- tools/tts/cosyvoice_gpu_constraints.txt tools/tts/cosyvoice_gpu_runtime.json >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime must follow Ape-verified torchaudio 2.11.x
+  exit /b 1
+)
+
+git grep -F -e "cuda128_rtx50_ape_verified" -- tools/tts/cosyvoice_gpu_runtime.json >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime profile must reference Ape-verified RTX 50 route
+  exit /b 1
+)
+
+git grep -F -e "\"expected_cuda\": \"12.8\"" -- tools/tts/cosyvoice_gpu_runtime.json >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime must require CUDA 12.8
+  exit /b 1
+)
+
+git grep -F -e "\"expected_device_capability\": \"sm_120\"" -- tools/tts/cosyvoice_gpu_runtime.json >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime must require sm_120 for RTX 5080 profile
+  exit /b 1
+)
+
+git grep -F -e "torch==2.7.0" -- tools src desktop tests dev_check.bat EXECUTION_REPORT.md >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] torch 2.7.0 is obsolete; use Ape-verified torch 2.11.x + cu128
+  exit /b 1
+)
+
+git grep -F -e "CUDA_VISIBLE_DEVICES\", \"-1" -- desktop/src-tauri/src/lib.rs src tools desktop >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] CPU fallback is forbidden for CosyVoice GPU-only plan
+  exit /b 1
+)
+
+git grep -F -e "checkCosyVoiceGpuSmoke" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TTS workbench must run GPU smoke synthesis
+  exit /b 1
+)
+
+git grep -F -e "GPU 生成流被服务端提前中断" -- src/youshengshu_tts/providers/cosyvoice_http.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] provider must explain premature stream as GPU server failure
+  exit /b 1
+)
+
+git grep -F -e "kill_stale_cosyvoice_server_on_port" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] start_cosyvoice_service must handle stale CosyVoice server on port 50000
+  exit /b 1
+)
+
+git grep -F -e "fn find_processes_listening_on_port" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Windows stale server port scanner missing
+  exit /b 1
+)
+
+git grep -F -e "netstat" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale server detection must use netstat on Windows
+  exit /b 1
+)
+
+git grep -F -e "fn process_command_line" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] process command line inspection missing
+  exit /b 1
+)
+
+git grep -F -e "CommandLine" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] wmic command line parsing missing
+  exit /b 1
+)
+
+git grep -F -e "fn is_cosyvoice_fastapi_command" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice process safety predicate missing
+  exit /b 1
+)
+
+git grep -F -e "lower.contains(\"cosyvoice\")" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale killer must require cosyvoice in command line
+  exit /b 1
+)
+
+git grep -F -e "lower.contains(\"server.py\")" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale killer must require server.py in command line
+  exit /b 1
+)
+
+git grep -F -e "lower.contains(\"fastapi\")" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale killer must require fastapi in command line
+  exit /b 1
+)
+
+git grep -F -e "taskkill" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] verified stale CosyVoice server must be killable on Windows
+  exit /b 1
+)
+
+git grep -F -e "禁止盲杀" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale server killer must refuse blind killing
+  exit /b 1
+)
+
+git grep -F -e "gpu_runtime_marker_path" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime marker missing
+  exit /b 1
+)
+
+git grep -F -e "gpu_runtime_fingerprint" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU runtime fingerprint missing
+  exit /b 1
+)
+
+git grep -F -e "GPU marker exists but probe failed" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] GPU marker must not skip failed runtime probe
+  exit /b 1
+)
+
+git grep -F -e "准备更新 CosyVoice GPU runtime，先停止旧服务" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TTS workbench must stop CosyVoice before GPU runtime bootstrap
+  exit /b 1
+)
+
+git grep -F -e "use std::process::Command;" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] lib.rs must not import std::process::Command directly; use StdCommand alias
+  exit /b 1
+)
+
+git grep -F -e "use std::process::Command as StdCommand;" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] lib.rs must alias std::process::Command as StdCommand
+  exit /b 1
+)
+
+git grep -F -e "StdCommand::new(\"netstat\")" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale server scanner must use StdCommand::new
+  exit /b 1
+)
+
+git grep -F -e "const startOutput = await startCosyVoiceService" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] startCosyVoiceService returns void; UI must not inspect startOutput.code
+  exit /b 1
+)
+
+git grep -F -e "await startCosyVoiceService(ttsSettings.repoRoot, pythonCommand)" -- desktop/src/features/tts/TtsWorkbench.tsx >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] TtsWorkbench must call startCosyVoiceService with repoRoot and pythonCommand
+  exit /b 1
+)
+
+git grep -F -e "fn kill_active_cosyvoice_child" -- desktop/src-tauri/src/lib.rs >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] start_cosyvoice_service must kill active CosyVoice child before GPU probe
+  exit /b 1
+)
+
 echo [CHECK] OK
 exit /b 0
 

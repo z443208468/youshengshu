@@ -430,9 +430,54 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - import_probe_ok includes whisper: PASS
 - requirements marker is written only after import_probe_ok: PASS
 
+### CosyVoice GPU-only Runtime Verification
+
+- Current CUDA failure diagnosed as torch wheel missing sm_120 kernel support: PASS
+- CPU fallback was not implemented: PASS
+- CUDA_VISIBLE_DEVICES=-1 is not used: PASS
+- GPU runtime manifest exists and allow_cpu_fallback=false: PASS
+- Ape reference checked: z443208468/ape uses PyTorch 2.11.x + cu128 for RTX 5080 / sm_120: PASS
+- torch==2.11.* and torchaudio==2.11.* are installed from cu128 index: PASS
+- torch.version.cuda == 12.8: PASS
+- torch CUDA probe reports RTX 5080 / sm_120: PASS
+- CUDA matmul smoke test passes: PASS
+- CosyVoice /docs passes: PASS/FAIL
+- CosyVoice GPU smoke synthesis passes: PASS/FAIL
+- CosyVoice inference_sft GPU smoke passes: PASS/FAIL
+- Response ended prematurely is no longer surfaced without CUDA/PyTorch diagnosis: PASS
+
+### CosyVoice Stale Server / GPU Marker Verification
+
+- Existing CosyVoice server is stopped before GPU torch reinstall: PASS
+- Port 50000 stale server detection exists: PASS
+- Only verified CosyVoice server.py process may be auto-killed: PASS
+- /docs 200 does not mark service connected without GPU smoke: PASS
+- Existing /docs service failing GPU smoke triggers one restart: PASS
+- GPU marker hit still runs verify_gpu_torch_runtime: PASS
+- GPU marker probe failure triggers torch reinstall: PASS
+- GPU marker is written only after install + verify success: PASS
+
+### Windows Stale Server Kill Verification
+
+- find_processes_listening_on_port uses netstat -ano -p tcp: PASS
+- process_command_line reads WMIC CommandLine: PASS
+- stale killer only kills command lines containing cosyvoice + server.py + fastapi: PASS
+- non-CosyVoice process on port 50000 is refused, not killed: PASS
+- unreadable command line is refused, not killed: PASS
+- start_cosyvoice_service kills active child and stale 50000 server before GPU probe: PASS
+
+### Compile Integration Verification
+
+- std::process::Command is aliased as StdCommand, not imported over tokio::process::Command: PASS
+- stale server functions use StdCommand::new: PASS
+- start_cosyvoice_service does not return Ok for existing running child: PASS
+- kill_active_cosyvoice_child exists and is called before stale server cleanup: PASS
+- TtsWorkbench calls startCosyVoiceService(repoRoot, pythonCommand): PASS
+- TtsWorkbench does not inspect startOutput.code from startCosyVoiceService: PASS
+
 ### Verification
 
-- python -m pytest -q: PASS (85 passed)
+- python -m pytest -q: PASS (87 passed)
 - python -m youshengshu_tts.cli --help: PASS
 - TTS doctor smoke: PASS
 - TTS synthesize with fake provider: PASS (pytest)

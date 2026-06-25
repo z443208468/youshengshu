@@ -13,6 +13,7 @@ import type {
 import {
   bootstrapCosyVoiceRuntime,
   checkCosyVoiceRuntime,
+  killCosyVoiceService,
   killTtsProcess,
   resolvePath,
   runTtsCli,
@@ -299,6 +300,106 @@ export function TtsWorkbench({
     }
   }
 
+  async function checkCosyVoiceDocsOnly(): Promise<{ connected: boolean }> {
+    const connected = await checkCosyVoiceDocs();
+    return { connected };
+  }
+
+  async function pollCosyVoiceDocs(): Promise<{ connected: boolean }> {
+    for (let attempt = 1; attempt <= 180; attempt += 1) {
+      appendTtsLog(`等待 CosyVoice FastAPI 服务启动: ${attempt}/180`);
+      await sleep(1000);
+
+      const connected = await checkCosyVoiceDocs();
+      if (connected) {
+        return { connected: true };
+      }
+    }
+
+    return { connected: false };
+  }
+
+  async function checkCosyVoiceGpuSmoke(): Promise<{ ok: boolean; error: string | null }> {
+    const baseUrl = ttsSettings.providerBaseUrl.replace(/\/$/, "");
+    const form = new FormData();
+    form.append("tts_text", "你好。");
+    form.append("spk_id", "中文女");
+
+    try {
+      const response = await fetch(`${baseUrl}/inference_sft`, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 1000)}` };
+      }
+
+      const bytes = await response.arrayBuffer();
+
+      if (bytes.byteLength <= 0) {
+        return { ok: false, error: "GPU smoke returned empty audio" };
+      }
+
+      if (bytes.byteLength % 2 !== 0) {
+        return { ok: false, error: `GPU smoke returned non-int16 bytes: ${bytes.byteLength}` };
+      }
+
+      return { ok: true, error: null };
+    } catch (error) {
+      return { ok: false, error: errorToMessage(error) };
+    }
+  }
+
+  async function ensureCosyVoiceGpuServiceReady(): Promise<void> {
+    appendTtsLog("正在检查 CosyVoice GPU 服务。");
+
+    const docsBefore = await checkCosyVoiceDocsOnly();
+
+    if (docsBefore.connected) {
+      appendTtsLog("检测到 50000 端口已有 CosyVoice 服务，开始 GPU smoke。");
+      const smokeBefore = await checkCosyVoiceGpuSmoke();
+      if (smokeBefore.ok) {
+        setServiceStatus("connected");
+        setServiceError(null);
+        appendTtsLog("已有 CosyVoice 服务通过 GPU smoke。");
+        return;
+      }
+
+      appendTtsLog(
+        `已有 CosyVoice 服务 GPU smoke 失败，将重启服务: ${smokeBefore.error}`,
+      );
+      await killCosyVoiceService();
+    }
+
+    setServiceStatus("starting");
+    appendTtsLog("CosyVoice FastAPI 服务未连接或需重启，开始自动启动。");
+
+    try {
+      await startCosyVoiceService(ttsSettings.repoRoot, pythonCommand);
+    } catch (error) {
+      throw new Error(`CosyVoice GPU 服务启动失败: ${errorToMessage(error)}`);
+    }
+
+    const docsAfter = await pollCosyVoiceDocs();
+    if (!docsAfter.connected) {
+      throw new Error("CosyVoice GPU 服务启动后 /docs 未连接。");
+    }
+
+    const smokeAfter = await checkCosyVoiceGpuSmoke();
+    if (!smokeAfter.ok) {
+      setServiceStatus("error");
+      setServiceError(`CosyVoice GPU smoke synthesis 失败: ${smokeAfter.error}`);
+      appendTtsLog(`CosyVoice GPU smoke synthesis 失败: ${smokeAfter.error}`);
+      return;
+    }
+
+    setServiceStatus("connected");
+    setServiceError(null);
+    appendTtsLog("CosyVoice GPU smoke synthesis 通过。");
+  }
+
   async function ensureCosyVoiceRuntimeAndServiceReady() {
     setServiceStatus("checking_runtime");
     setServiceError(null);
@@ -310,6 +411,18 @@ export function TtsWorkbench({
     if (!runtime.ready) {
       setServiceStatus("bootstrapping_runtime");
       appendTtsLog(`CosyVoice 运行环境缺失: ${runtime.missing.join(", ")}`);
+      appendTtsLog("准备更新 CosyVoice GPU runtime，先停止旧服务。");
+
+      try {
+        await killCosyVoiceService();
+      } catch (error) {
+        const message = errorToMessage(error);
+        setServiceStatus("error");
+        setServiceError(message);
+        appendTtsLog(`停止旧 CosyVoice 服务失败: ${message}`);
+        return;
+      }
+
       appendTtsLog("开始自动安装 CosyVoice 运行环境。");
 
       try {
@@ -345,47 +458,15 @@ export function TtsWorkbench({
     }
 
     setServiceStatus("checking");
-    appendTtsLog("正在检查 CosyVoice FastAPI 服务。");
-
-    const alreadyConnected = await checkCosyVoiceDocs();
-
-    if (alreadyConnected) {
-      setServiceStatus("connected");
-      appendTtsLog("CosyVoice FastAPI 服务已连接。");
-      return;
-    }
-
-    setServiceStatus("starting");
-    appendTtsLog("CosyVoice FastAPI 服务未连接，开始自动启动。");
 
     try {
-      await startCosyVoiceService(ttsSettings.repoRoot, pythonCommand);
+      await ensureCosyVoiceGpuServiceReady();
     } catch (error) {
       const message = errorToMessage(error);
       setServiceStatus("error");
       setServiceError(message);
-      appendTtsLog(`CosyVoice FastAPI 服务自动启动失败: ${message}`);
-      return;
+      appendTtsLog(message);
     }
-
-    for (let attempt = 1; attempt <= 180; attempt += 1) {
-      appendTtsLog(`等待 CosyVoice FastAPI 服务启动: ${attempt}/180`);
-      await sleep(1000);
-
-      const connected = await checkCosyVoiceDocs();
-
-      if (connected) {
-        setServiceStatus("connected");
-        setServiceError(null);
-        appendTtsLog("CosyVoice FastAPI 服务已自动启动并连接。");
-        return;
-      }
-    }
-
-    const message = "CosyVoice FastAPI 服务启动超时，180 秒内未连通 /docs。";
-    setServiceStatus("error");
-    setServiceError(message);
-    appendTtsLog(message);
   }
 
   useEffect(() => {

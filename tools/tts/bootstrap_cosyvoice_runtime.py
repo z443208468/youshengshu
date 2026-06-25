@@ -499,6 +499,195 @@ def install_requirements(repo_root: Path, venv_python: Path) -> None:
     marker.write_text(current_hash, encoding="utf-8")
 
 
+def gpu_runtime_manifest_path(repo_root: Path) -> Path:
+    return repo_root / "tools" / "tts" / "cosyvoice_gpu_runtime.json"
+
+
+def load_gpu_runtime_manifest(repo_root: Path) -> dict:
+    path = gpu_runtime_manifest_path(repo_root)
+    if not path.exists():
+        raise RuntimeError(f"CosyVoice GPU runtime manifest missing: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def gpu_runtime_marker_path(venv_python: Path) -> Path:
+    return venv_python.parent.parent / ".yss_gpu_runtime_sha256"
+
+
+def gpu_runtime_fingerprint(repo_root: Path) -> str:
+    manifest_path = gpu_runtime_manifest_path(repo_root)
+    constraints_path = repo_root / "tools" / "tts" / "cosyvoice_gpu_constraints.txt"
+
+    digest = hashlib.sha256()
+    digest.update(manifest_path.read_bytes())
+    digest.update(b"\n---constraints---\n")
+    digest.update(constraints_path.read_bytes())
+    return digest.hexdigest()
+
+
+def gpu_pip_install_env() -> dict[str, str]:
+    """GPU torch reinstall must not inherit setuptools<70 from cosyvoice_build_constraints."""
+    return {
+        "PIP_NO_INPUT": "1",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+
+def install_gpu_torch_runtime(repo_root: Path, venv_python: Path) -> None:
+    manifest = load_gpu_runtime_manifest(repo_root)
+    index_url = manifest["cuda_index_url"]
+    torch_version = manifest["torch"]
+    torchaudio_version = manifest["torchaudio"]
+
+    run_step(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--force-reinstall",
+            f"torch=={torch_version}",
+            f"torchaudio=={torchaudio_version}",
+            "--index-url",
+            index_url,
+        ],
+        env=gpu_pip_install_env(),
+    )
+
+    emit(
+        "gpu_torch_runtime_installed",
+        "Installed GPU PyTorch runtime",
+        {
+            "torch": torch_version,
+            "torchaudio": torchaudio_version,
+            "index_url": index_url,
+        },
+    )
+
+
+def verify_gpu_torch_runtime(repo_root: Path, venv_python: Path) -> None:
+    code = r'''
+import json
+import torch
+
+payload = {
+    "torch_version": torch.__version__,
+    "torch_cuda": torch.version.cuda,
+    "cuda_available": torch.cuda.is_available(),
+    "device_name": None,
+    "device_capability": None,
+    "arch_list": [],
+    "sm_supported_by_arch_list": False,
+    "cuda_kernel_ok": False,
+}
+
+payload["arch_list"] = list(torch.cuda.get_arch_list())
+
+if not torch.cuda.is_available():
+    print(json.dumps(payload, ensure_ascii=False))
+    raise SystemExit(10)
+
+device_name = torch.cuda.get_device_name(0)
+major, minor = torch.cuda.get_device_capability(0)
+sm = f"sm_{major}{minor}"
+
+payload["device_name"] = device_name
+payload["device_capability"] = sm
+payload["sm_supported_by_arch_list"] = sm in set(payload["arch_list"])
+
+x = torch.randn((256, 256), device="cuda", dtype=torch.float32)
+y = torch.randn((256, 256), device="cuda", dtype=torch.float32)
+z = x @ y
+torch.cuda.synchronize()
+payload["cuda_kernel_ok"] = bool(z.is_cuda and z.numel() == 256 * 256)
+
+print(json.dumps(payload, ensure_ascii=False))
+
+if not payload["cuda_kernel_ok"]:
+    raise SystemExit(11)
+'''
+
+    result = subprocess.run(
+        [str(venv_python), "-c", code],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "CosyVoice GPU torch runtime verification failed; "
+            f"returncode={result.returncode}; stdout={stdout}; stderr={stderr}"
+        )
+
+    payload = json.loads(stdout.splitlines()[-1])
+
+    if not payload["cuda_available"]:
+        raise RuntimeError(f"CUDA unavailable after GPU torch install: {payload}")
+
+    if not payload["cuda_kernel_ok"]:
+        raise RuntimeError(f"CUDA kernel smoke failed after GPU torch install: {payload}")
+
+    manifest = load_gpu_runtime_manifest(repo_root)
+    expected_cuda = manifest.get("expected_cuda")
+    expected_device_contains = manifest.get("expected_device_contains")
+    expected_device_capability = manifest.get("expected_device_capability")
+
+    if expected_cuda and payload["torch_cuda"] != expected_cuda:
+        raise RuntimeError(
+            f"GPU torch CUDA version mismatch; expected={expected_cuda}; payload={payload}"
+        )
+
+    if expected_device_contains and expected_device_contains.lower() not in (
+        payload["device_name"] or ""
+    ).lower():
+        raise RuntimeError(
+            "GPU device mismatch; "
+            f"expected contains={expected_device_contains}; payload={payload}"
+        )
+
+    if expected_device_capability and payload["device_capability"] != expected_device_capability:
+        raise RuntimeError(
+            "GPU capability mismatch; "
+            f"expected={expected_device_capability}; payload={payload}"
+        )
+
+    emit("gpu_torch_runtime_ok", "GPU PyTorch runtime verified", payload)
+
+
+def ensure_gpu_torch_runtime(repo_root: Path, venv_python: Path) -> None:
+    marker = gpu_runtime_marker_path(venv_python)
+    fingerprint = gpu_runtime_fingerprint(repo_root)
+
+    if marker.exists() and marker.read_text(encoding="utf-8").strip() == fingerprint:
+        try:
+            verify_gpu_torch_runtime(repo_root, venv_python)
+            emit(
+                "gpu_runtime_exists",
+                "GPU torch runtime already verified",
+                {"marker": str(marker)},
+            )
+            return
+        except Exception as exc:
+            emit(
+                "gpu_runtime_repair",
+                "GPU marker exists but probe failed; reinstalling GPU torch runtime",
+                {"error": str(exc)},
+            )
+
+    install_gpu_torch_runtime(repo_root, venv_python)
+    verify_gpu_torch_runtime(repo_root, venv_python)
+    marker.write_text(fingerprint, encoding="utf-8")
+
+
 def download_model(repo_root: Path, venv_python: Path, model_profile: str) -> None:
     profile = MODEL_PROFILES[model_profile]
     paths = runtime_paths(repo_root)
@@ -543,6 +732,7 @@ def main() -> int:
     ensure_fastapi_server(repo_root)
     venv_python = ensure_venv(repo_root, venv_creator, args.model_profile)
     install_requirements(repo_root, venv_python)
+    ensure_gpu_torch_runtime(repo_root, venv_python)
     download_model(repo_root, venv_python, args.model_profile)
 
     status = check_cosyvoice_runtime(repo_root)

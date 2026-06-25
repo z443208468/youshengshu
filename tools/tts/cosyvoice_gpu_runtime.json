@@ -1,0 +1,12 @@
+{
+  "profile": "cuda128_rtx50_ape_verified",
+  "backend": "cuda",
+  "torch": "2.11.*",
+  "torchaudio": "2.11.*",
+  "cuda_index_url": "https://download.pytorch.org/whl/cu128",
+  "expected_cuda": "12.8",
+  "expected_device_contains": "RTX 5080",
+  "expected_device_capability": "sm_120",
+  "allow_cpu_fallback": false,
+  "source_reference": "z443208468/ape SETUP.md"
+}

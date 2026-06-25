@@ -3,6 +3,7 @@ import wave
 from pathlib import Path
 
 import requests
+from requests.exceptions import ChunkedEncodingError, ConnectionError, ReadTimeout
 
 from .base import TtsProvider, TtsProviderResult
 from ..config import CosyVoiceHttpConfig
@@ -96,7 +97,17 @@ class CosyVoiceHttpProvider(TtsProvider):
                     f"CosyVoice HTTP {response.status_code}: {body}"
                 )
 
-            pcm = b"".join(response.iter_content(chunk_size=16000))
+            try:
+                pcm = b"".join(response.iter_content(chunk_size=16000))
+            except ChunkedEncodingError as exc:
+                raise TtsProviderError(
+                    "CosyVoice GPU 生成流被服务端提前中断。"
+                    "当前最常见原因是服务端 CUDA/PyTorch/模型推理崩溃；"
+                    "请检查 CosyVoice 服务日志中的 no kernel image / CUDA / torch 错误。"
+                ) from exc
+            except (ConnectionError, ReadTimeout) as exc:
+                raise TtsProviderError(f"CosyVoice HTTP stream 读取失败: {exc}") from exc
+
             if not pcm:
                 raise TtsProviderError("CosyVoice 返回空音频。")
 
