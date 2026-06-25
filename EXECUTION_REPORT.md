@@ -419,9 +419,20 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - YSS_COSYVOICE_PYTHON_VERSION override is supported: PASS
 - run_step reports missing executable without raw WinError traceback: PASS
 
+### CosyVoice Requirements Install Verification
+
+- openai-whisper==20231117 failure with missing pkg_resources reproduced or analyzed: PASS
+- tools/tts/cosyvoice_build_constraints.txt exists: PASS
+- setuptools<70 and wheel are constrained before requirements install: PASS
+- ensure_build_backend probes pkg_resources: PASS
+- ensure_openai_whisper installs openai-whisper==20231117 with --no-build-isolation: PASS
+- pip install -r requirements.txt uses PIP_CONSTRAINT: PASS
+- import_probe_ok includes whisper: PASS
+- requirements marker is written only after import_probe_ok: PASS
+
 ### Verification
 
-- python -m pytest -q: PASS (82 passed)
+- python -m pytest -q: PASS (85 passed)
 - python -m youshengshu_tts.cli --help: PASS
 - TTS doctor smoke: PASS
 - TTS synthesize with fake provider: PASS (pytest)

@@ -437,6 +437,48 @@ if %ERRORLEVEL% EQU 0 (
   exit /b 1
 )
 
+git grep -F -e "cosyvoice_build_constraints.txt" -- tools/tts/bootstrap_cosyvoice_runtime.py tools/tts/cosyvoice_build_constraints.txt >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] CosyVoice build constraints missing
+  exit /b 1
+)
+
+git grep -F -e "def ensure_build_backend" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] ensure_build_backend missing
+  exit /b 1
+)
+
+git grep -F -e "import pkg_resources" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] build backend must probe pkg_resources
+  exit /b 1
+)
+
+git grep -F -e "def ensure_openai_whisper" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] ensure_openai_whisper missing
+  exit /b 1
+)
+
+git grep -F -e "--no-build-isolation" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] openai-whisper install must use --no-build-isolation
+  exit /b 1
+)
+
+git grep -F -e "openai-whisper==20231117" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] openai-whisper version must match CosyVoice requirements
+  exit /b 1
+)
+
+git grep -F -e "import whisper" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must verify whisper import
+  exit /b 1
+)
+
 git grep "bootstrapOutput.code" -- desktop/src/features/tts/TtsWorkbench.tsx 2>nul | findstr !== >nul
 if errorlevel 1 (
   echo [ERROR] TtsWorkbench must reject failed bootstrap ProcessOutput

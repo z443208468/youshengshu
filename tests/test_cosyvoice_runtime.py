@@ -5,6 +5,7 @@ import sys
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
@@ -149,3 +150,78 @@ def test_python_candidates_do_not_hardcode_local_python_path() -> None:
 
     assert "C:/Python310/python.exe" not in rendered
     assert "C:/Program Files/Python310/python.exe" not in rendered
+
+
+def test_build_constraints_file_exists() -> None:
+    path = REPO_ROOT / "tools" / "tts" / "cosyvoice_build_constraints.txt"
+    assert path.exists()
+    text = path.read_text(encoding="utf-8")
+    assert "setuptools<70" in text
+    assert "wheel" in text
+
+
+def test_pip_install_env_uses_constraints() -> None:
+    env = _bootstrap_mod.pip_install_env(REPO_ROOT)
+    assert "PIP_CONSTRAINT" in env
+    assert env["PIP_CONSTRAINT"].endswith("tools\\tts\\cosyvoice_build_constraints.txt") or env[
+        "PIP_CONSTRAINT"
+    ].endswith("tools/tts/cosyvoice_build_constraints.txt")
+    assert env["PIP_NO_INPUT"] == "1"
+
+
+def test_install_requirements_orders_build_backend_before_whisper_before_requirements(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[str] = []
+
+    fake_repo = tmp_path
+    cosyvoice_dir = fake_repo / "third_party" / "tts" / "CosyVoice"
+    cosyvoice_dir.mkdir(parents=True)
+    requirements = cosyvoice_dir / "requirements.txt"
+    requirements.write_text("openai-whisper==20231117\n", encoding="utf-8")
+
+    venv_python = fake_repo / "third_party" / "tts" / ".cosyvoice_venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    constraints = fake_repo / "tools" / "tts" / "cosyvoice_build_constraints.txt"
+    constraints.parent.mkdir(parents=True)
+    constraints.write_text("setuptools<70\nwheel\n", encoding="utf-8")
+
+    def fake_runtime_paths(repo_root: Path) -> dict[str, Path]:
+        return {
+            "cosyvoice_dir": cosyvoice_dir,
+            "model_dir": cosyvoice_dir / "pretrained_models" / "CosyVoice-300M-SFT",
+        }
+
+    def fake_run_step(args, cwd=None, env=None):
+        calls.append(" ".join(str(x) for x in args))
+
+    whisper_checks = 0
+
+    def fake_probe(args, **kwargs):
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        nonlocal whisper_checks
+        code = args[-1] if args else ""
+        if isinstance(code, str) and "import whisper" in code:
+            whisper_checks += 1
+            if whisper_checks == 1:
+                return type("R", (), {"returncode": 1, "stdout": "", "stderr": "no whisper"})()
+        return Result()
+
+    monkeypatch.setattr(_bootstrap_mod, "runtime_paths", fake_runtime_paths)
+    monkeypatch.setattr(_bootstrap_mod, "run_step", fake_run_step)
+    monkeypatch.setattr(_bootstrap_mod, "import_probe_ok", lambda python: True)
+    monkeypatch.setattr(_bootstrap_mod.subprocess, "run", fake_probe)
+
+    _bootstrap_mod.install_requirements(fake_repo, venv_python)
+
+    joined = "\n".join(calls)
+    assert "setuptools<70" in joined
+    assert "openai-whisper==20231117" in joined
+    assert "-r" in joined
+    assert joined.index("setuptools<70") < joined.index("openai-whisper==20231117")

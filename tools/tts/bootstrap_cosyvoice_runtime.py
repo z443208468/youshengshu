@@ -30,18 +30,48 @@ def emit(event: str, message: str, detail: dict | None = None) -> None:
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
-def run_step(args: list[str], cwd: Path | None = None, env: dict | None = None) -> None:
+def run_step(
+    args: list[str],
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
     emit("command_start", " ".join(args), {"cwd": str(cwd) if cwd else ""})
-    result = subprocess.run(
-        args,
-        cwd=str(cwd) if cwd else None,
-        env=env,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+
+    try:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd) if cwd else None,
+            env=merged_env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"command executable not found: {args[0]}; "
+            f"command={' '.join(args)}; "
+            f"cwd={str(cwd) if cwd else ''}"
+        ) from exc
+
+    if result.stdout.strip():
+        emit("command_stdout", result.stdout.strip())
+
+    if result.stderr.strip():
+        emit("command_stderr", result.stderr.strip())
+
     if result.returncode != 0:
-        raise RuntimeError(f"command failed: {' '.join(args)} code={result.returncode}")
+        raise RuntimeError(
+            f"command failed: {' '.join(args)} code={result.returncode}\n"
+            f"stdout={result.stdout[-4000:]}\n"
+            f"stderr={result.stderr[-4000:]}"
+        )
+
     emit("command_done", " ".join(args))
 
 
@@ -275,10 +305,133 @@ def requirements_marker_path(venv_python: Path) -> Path:
     return venv_python.parent.parent / ".yss_requirements_sha256"
 
 
+def build_constraints_path(repo_root: Path) -> Path:
+    return repo_root / "tools" / "tts" / "cosyvoice_build_constraints.txt"
+
+
+def pip_install_env(repo_root: Path) -> dict[str, str]:
+    constraints = build_constraints_path(repo_root)
+
+    if not constraints.exists():
+        raise RuntimeError(f"CosyVoice build constraints file missing: {constraints}")
+
+    return {
+        "PIP_CONSTRAINT": str(constraints),
+        "PIP_NO_INPUT": "1",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+
+def ensure_build_backend(repo_root: Path, venv_python: Path) -> None:
+    env = pip_install_env(repo_root)
+
+    run_step(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "pip",
+        ],
+        env=env,
+    )
+
+    run_step(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "setuptools<70",
+            "wheel",
+        ],
+        env=env,
+    )
+
+    result = subprocess.run(
+        [
+            str(venv_python),
+            "-c",
+            "import pkg_resources, setuptools, wheel; print('build-backend-ok')",
+        ],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "CosyVoice build backend probe failed; "
+            f"stdout={result.stdout}; stderr={result.stderr}"
+        )
+
+    emit("build_backend_ok", "CosyVoice build backend is ready")
+
+
+def ensure_openai_whisper(repo_root: Path, venv_python: Path) -> None:
+    env = pip_install_env(repo_root)
+
+    result = subprocess.run(
+        [
+            str(venv_python),
+            "-c",
+            "import whisper; print('openai-whisper-ok')",
+        ],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if result.returncode == 0:
+        emit("openai_whisper_exists", "openai-whisper already importable")
+        return
+
+    run_step(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "--no-build-isolation",
+            "openai-whisper==20231117",
+        ],
+        env=env,
+    )
+
+    result = subprocess.run(
+        [
+            str(venv_python),
+            "-c",
+            "import whisper; print('openai-whisper-ok')",
+        ],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "openai-whisper import probe failed after install; "
+            f"stdout={result.stdout}; stderr={result.stderr}"
+        )
+
+    emit("openai_whisper_ok", "openai-whisper installed and importable")
+
+
 def import_probe_ok(venv_python: Path) -> bool:
     code = (
         "import fastapi, uvicorn, requests, numpy, torch, torchaudio, "
-        "huggingface_hub, modelscope; "
+        "huggingface_hub, modelscope, whisper; "
         "print('ok')"
     )
     result = subprocess.run(
@@ -302,6 +455,7 @@ def install_requirements(repo_root: Path, venv_python: Path) -> None:
 
     marker = requirements_marker_path(venv_python)
     current_hash = file_sha256(requirements)
+    env = pip_install_env(repo_root)
 
     if (
         marker.exists()
@@ -311,9 +465,33 @@ def install_requirements(repo_root: Path, venv_python: Path) -> None:
         emit("requirements_exists", "CosyVoice requirements already installed", {"marker": str(marker)})
         return
 
-    run_step([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
-    run_step([str(venv_python), "-m", "pip", "install", "-r", str(requirements)], cwd=cosyvoice_dir)
-    run_step([str(venv_python), "-m", "pip", "install", "huggingface_hub", "modelscope"])
+    ensure_build_backend(repo_root, venv_python)
+    ensure_openai_whisper(repo_root, venv_python)
+
+    run_step(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            str(requirements),
+        ],
+        cwd=cosyvoice_dir,
+        env=env,
+    )
+
+    run_step(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "huggingface_hub",
+            "modelscope",
+        ],
+        env=env,
+    )
 
     if not import_probe_ok(venv_python):
         raise RuntimeError("CosyVoice dependency import probe failed after pip install")
