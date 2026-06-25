@@ -980,6 +980,102 @@ if errorlevel 1 (
   exit /b 1
 )
 
+git grep -F -e "SEGMENT_STATUS_IN_PROGRESS" -- src/youshengshu_tts/manifest.py src/youshengshu_tts/pipeline.py src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] segment in_progress status missing
+  exit /b 1
+)
+
+git grep -F -e "def validate_wav_file" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] durable resume requires wav validation
+  exit /b 1
+)
+
+git grep -F -e "def reconcile_segment_for_resume" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] segment resume reconciliation missing
+  exit /b 1
+)
+
+git grep -F -e "def reconcile_chapter_for_resume" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] chapter resume reconciliation missing
+  exit /b 1
+)
+
+git grep -F -e "def recover_manifest_state" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] project-level manifest recovery missing
+  exit /b 1
+)
+
+git grep -F -e "tmp_path_for_final" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] stale tmp cleanup helper missing
+  exit /b 1
+)
+
+git grep -F -e "segment.status = SEGMENT_STATUS_IN_PROGRESS" -- src/youshengshu_tts/pipeline.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] pipeline must persist in_progress before provider call
+  exit /b 1
+)
+
+git grep -F -e "validate_wav_file(segment_wav_path" -- src/youshengshu_tts/pipeline.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] pipeline must validate segment wav after synthesis
+  exit /b 1
+)
+
+git grep -F -e "retry_failed=True" -- src/youshengshu_tts/pipeline.py src/youshengshu_tts/cli.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] synthesize path must retry failed/interrupted segments
+  exit /b 1
+)
+
+git grep -F -e "retry_failed=False" -- src/youshengshu_tts/cli.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] status/pre-scan recovery must not rewrite failed to pending
+  exit /b 1
+)
+
+git grep -F -e "TtsTransientProviderError" -- src/youshengshu_tts/exceptions.py src/youshengshu_tts/providers/cosyvoice_http.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] transient provider error classification missing
+  exit /b 1
+)
+
+git grep -F -e "从失败处继续" -- desktop/src >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] Do not add a UI resume button; resume must be automatic
+  exit /b 1
+)
+
+git grep -F -e "def cleanup_tmp_file_for_path" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] generic tmp cleanup helper missing
+  exit /b 1
+)
+
+git grep -F -e "def cleanup_manifest_and_segments_tmp" -- src/youshengshu_tts/resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] manifest/segments tmp cleanup missing
+  exit /b 1
+)
+
+git grep -F -e "cleanup_manifest_and_segments_tmp" -- src/youshengshu_tts/resume.py src/youshengshu_tts/pipeline.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] resume and synthesize path must clean JSON tmp files
+  exit /b 1
+)
+
+git grep -F -e "test_resume_removes_manifest_and_segments_tmp" -- tests/test_tts_resume.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] JSON tmp cleanup test missing
+  exit /b 1
+)
+
 echo [CHECK] OK
 exit /b 0
 

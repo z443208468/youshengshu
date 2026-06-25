@@ -477,7 +477,7 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 
 ### Verification
 
-- python -m pytest -q: PASS (87 passed)
+- python -m pytest -q: PASS (99 passed)
 - python -m youshengshu_tts.cli --help: PASS
 - TTS doctor smoke: PASS
 - TTS synthesize with fake provider: PASS (pytest)
@@ -485,13 +485,32 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - cargo check: PASS
 - cargo test: PASS (8 passed)
 - dev_check.bat: PASS
-- LOCAL_HEAD == REMOTE_HEAD: PASS (3d249fb)
+- LOCAL_HEAD == REMOTE_HEAD: PASS (49f24c9)
+
+### TTS Durable Resume Verification
+
+- resume.py created with deterministic segment/chapter path helpers: PASS
+- validate_wav_file verifies wav header, channels, sample width, sample rate, frames: PASS
+- stale .tmp files are treated as uncommitted and removed during recovery: PASS
+- pending/in_progress/failed segment with valid final wav is recovered to done: PASS
+- done segment with missing/corrupt wav is reset to pending: PASS
+- failed segment is not reset during status recovery: PASS
+- failed segment is reset/retried during synthesize resume: PASS
+- segment is persisted as in_progress before provider call: PASS
+- segment wav is validated before status done: PASS
+- all done segments with missing chapter wav triggers merge: PASS
+- valid chapter wav with stale manifest marks chapter done: PASS
+- synthesize-all resumes from first non-done chapter and skips recovered done segments: PASS
+- no UI "resume from failed" button was added: PASS
+- manifest .tmp and segments .tmp are cleaned as uncommitted transaction artifacts: PASS
+- recovery never reads .tmp JSON files as source of truth: PASS
+- stale segments JSON tmp does not override final committed segments JSON: PASS
 
 ### Git Sync Verification
 
 - Branch: main
-- Commit: 3d249fbf78cecf9753acf691d45e89f2ddd4813c
+- Commit: 49f24c95e41ef424fdaf78425fe1f17e993bf977
 - Pushed to origin/main: PASS
-- LOCAL_HEAD: 3d249fbf78cecf9753acf691d45e89f2ddd4813c
-- REMOTE_HEAD: 3d249fbf78cecf9753acf691d45e89f2ddd4813c
+- LOCAL_HEAD: 49f24c95e41ef424fdaf78425fe1f17e993bf977
+- REMOTE_HEAD: 49f24c95e41ef424fdaf78425fe1f17e993bf977
 - LOCAL_HEAD == REMOTE_HEAD: PASS

@@ -8,3 +8,7 @@ class TtsConfigError(TtsError):
 
 class TtsProviderError(TtsError):
     """TTS provider request or audio processing failed."""
+
+
+class TtsTransientProviderError(TtsProviderError):
+    """Provider failed due to a retryable transport/server-stream interruption."""

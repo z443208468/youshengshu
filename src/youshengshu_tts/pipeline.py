@@ -1,13 +1,11 @@
-import json
 import re
-from dataclasses import asdict
 from pathlib import Path
 
-from .audio_merge import merge_wav_files
 from .config import TtsAppConfig
 from .manifest import (
     SEGMENT_STATUS_DONE,
     SEGMENT_STATUS_FAILED,
+    SEGMENT_STATUS_IN_PROGRESS,
     SEGMENT_STATUS_PENDING,
     TTS_STATUS_DONE,
     TTS_STATUS_FAILED,
@@ -16,11 +14,18 @@ from .manifest import (
     TtsChapter,
     TtsManifest,
     TtsSegment,
-    load_manifest,
     now_iso,
     sha256_text,
 )
 from .providers.base import TtsProvider
+from .resume import (
+    cleanup_manifest_and_segments_tmp,
+    expected_segment_wav_path,
+    reconcile_chapter_for_resume,
+    recompute_chapter_counts,
+    validate_wav_file,
+)
+from .segment_store import load_segments, save_segments
 from .text_segmenter import split_text_to_segments
 
 
@@ -142,40 +147,6 @@ def get_chapter_or_raise(manifest: TtsManifest, chapter_index: int) -> TtsChapte
     raise ValueError(f"章节不存在: {chapter_index}")
 
 
-def load_segments(path: Path) -> list[TtsSegment]:
-    if not path.exists():
-        raise FileNotFoundError(f"TTS segments 文件不存在: {path}")
-
-    data = json.loads(path.read_text(encoding="utf-8"))
-    segments: list[TtsSegment] = []
-
-    for item in data:
-        segments.append(
-            TtsSegment(
-                chapter_index=int(item["chapter_index"]),
-                segment_index=int(item["segment_index"]),
-                text=str(item["text"]),
-                text_sha256=str(item["text_sha256"]),
-                status=str(item.get("status", SEGMENT_STATUS_PENDING)),
-                wav_path=item.get("wav_path"),
-                duration_ms=item.get("duration_ms"),
-                error=item.get("error"),
-            )
-        )
-
-    return segments
-
-
-def save_segments(path: Path, segments: list[TtsSegment]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps([asdict(segment) for segment in segments], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    tmp.replace(path)
-
-
 def ensure_chapter_segments(
     chapter: TtsChapter,
     config: TtsAppConfig,
@@ -204,41 +175,80 @@ def synthesize_chapter(
     provider: TtsProvider,
 ) -> None:
     chapter = get_chapter_or_raise(manifest, chapter_index)
+
+    cleanup_manifest_and_segments_tmp(
+        manifest_path=manifest_path,
+        chapter=chapter,
+    )
+
     segments = ensure_chapter_segments(chapter, config, manifest, manifest_path)
 
     if not chapter.segments_path:
         raise ValueError(f"章节缺少 segments_path: {chapter.index}")
 
     segments_path = Path(chapter.segments_path)
-    wav_root = Path(config.paths.output_dir) / "wav_segments" / f"chapter_{chapter.index:03d}"
-    chapter_wav_path = Path(config.paths.output_dir) / "chapters" / f"chapter_{chapter.index:03d}.wav"
 
-    chapter.status = TTS_STATUS_IN_PROGRESS
-    chapter.error = None
+    reconcile_chapter_for_resume(
+        config=config,
+        chapter=chapter,
+        segments=segments,
+        retry_failed=True,
+        merge_when_complete=True,
+    )
+
+    save_segments(segments_path, segments)
     manifest.save(manifest_path)
 
-    for segment in segments:
-        segment_wav_path = wav_root / f"seg_{segment.segment_index:06d}.wav"
+    if chapter.status == TTS_STATUS_DONE:
+        return
 
+    for segment in segments:
+        segment_wav_path = expected_segment_wav_path(config, chapter, segment)
+
+        existing_wav = validate_wav_file(segment_wav_path, config.cosyvoice.sample_rate)
         if (
             segment.status == SEGMENT_STATUS_DONE
-            and segment.wav_path
-            and Path(segment.wav_path).exists()
+            and segment.wav_path == str(segment_wav_path)
+            and existing_wav.ok
             and segment.text_sha256 == sha256_text(segment.text)
         ):
             continue
 
         try:
-            segment.status = SEGMENT_STATUS_PENDING
+            tmp = segment_wav_path.with_suffix(segment_wav_path.suffix + ".tmp")
+            if tmp.exists():
+                tmp.unlink()
+
+            segment.status = SEGMENT_STATUS_IN_PROGRESS
+            segment.wav_path = None
+            segment.duration_ms = None
             segment.error = None
+
+            chapter.status = TTS_STATUS_IN_PROGRESS
+            chapter.error = None
+            recompute_chapter_counts(chapter, segments)
+
             save_segments(segments_path, segments)
+            manifest.save(manifest_path)
 
             provider.synthesize_to_file(segment.text, segment_wav_path)
 
+            wav_result = validate_wav_file(segment_wav_path, config.cosyvoice.sample_rate)
+            if not wav_result.ok:
+                raise RuntimeError(
+                    f"segment wav invalid after synthesis: {segment_wav_path}; "
+                    f"reason={wav_result.reason}"
+                )
+
             segment.status = SEGMENT_STATUS_DONE
             segment.wav_path = str(segment_wav_path)
+            segment.duration_ms = wav_result.duration_ms
             segment.error = None
+
+            recompute_chapter_counts(chapter, segments)
+
             save_segments(segments_path, segments)
+            manifest.save(manifest_path)
 
         except Exception as exc:
             segment.status = SEGMENT_STATUS_FAILED
@@ -246,12 +256,7 @@ def synthesize_chapter(
 
             chapter.status = TTS_STATUS_FAILED
             chapter.error = str(exc)
-            chapter.done_segment_count = sum(
-                1 for item in segments if item.status == SEGMENT_STATUS_DONE
-            )
-            chapter.failed_segment_count = sum(
-                1 for item in segments if item.status == SEGMENT_STATUS_FAILED
-            )
+            recompute_chapter_counts(chapter, segments)
 
             save_segments(segments_path, segments)
             manifest.save(manifest_path)
@@ -260,23 +265,22 @@ def synthesize_chapter(
                 f"第 {chapter.index} 章第 {segment.segment_index} 段生成失败: {exc}"
             ) from exc
 
-    wav_inputs = [Path(segment.wav_path) for segment in segments if segment.wav_path]
-
-    if len(wav_inputs) != len(segments):
-        raise TtsPipelineStoppedError(
-            f"第 {chapter.index} 章存在缺失 wav 的片段，不能合并。"
-        )
-
-    merge_wav_files(wav_inputs, chapter_wav_path)
-
-    chapter.status = TTS_STATUS_DONE
-    chapter.done_segment_count = len(segments)
-    chapter.failed_segment_count = 0
-    chapter.chapter_wav_path = str(chapter_wav_path)
-    chapter.error = None
+    reconcile_chapter_for_resume(
+        config=config,
+        chapter=chapter,
+        segments=segments,
+        retry_failed=False,
+        merge_when_complete=True,
+    )
 
     save_segments(segments_path, segments)
     manifest.save(manifest_path)
+
+    if chapter.status != TTS_STATUS_DONE:
+        raise TtsPipelineStoppedError(
+            f"第 {chapter.index} 章未能完成恢复/合并: status={chapter.status}; "
+            f"error={chapter.error}"
+        )
 
 
 def find_next_chapter_index(manifest: TtsManifest) -> int | None:

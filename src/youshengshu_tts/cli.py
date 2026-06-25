@@ -8,6 +8,7 @@ from .config import load_tts_config
 from .diagnostics import doctor_payload
 from .exceptions import TtsError
 from .manifest import load_manifest, manifest_status_payload
+from .resume import recover_manifest_state
 from .pipeline import (
     TtsPipelineStoppedError,
     create_project,
@@ -73,6 +74,14 @@ def cmd_status(config_path: str, as_json: bool) -> None:
         sys.exit(1)
 
     manifest = load_manifest(manifest_path)
+    recover_manifest_state(
+        config=config,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        retry_failed=False,
+        merge_when_complete=True,
+    )
+    manifest = load_manifest(manifest_path)
     payload = manifest_status_payload(manifest)
     if as_json:
         print_json(payload)
@@ -97,6 +106,14 @@ def cmd_segment(config_path: str, chapter_index: int) -> None:
 def cmd_synthesize(config_path: str, chapter_index: int, as_json: bool) -> None:
     config = load_tts_config(config_path)
     manifest_path = Path(config.paths.manifest_file)
+    manifest = load_manifest(manifest_path)
+    recover_manifest_state(
+        config=config,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        retry_failed=False,
+        merge_when_complete=True,
+    )
     manifest = load_manifest(manifest_path)
     provider = build_provider(config)
 
@@ -123,6 +140,14 @@ def cmd_synthesize_next(config_path: str, as_json: bool) -> None:
     config = load_tts_config(config_path)
     manifest_path = Path(config.paths.manifest_file)
     manifest = load_manifest(manifest_path)
+    recover_manifest_state(
+        config=config,
+        manifest=manifest,
+        manifest_path=manifest_path,
+        retry_failed=False,
+        merge_when_complete=True,
+    )
+    manifest = load_manifest(manifest_path)
     next_index = find_next_chapter_index(manifest)
     if next_index is None:
         payload = {"message": "没有待处理章节", "chapter_index": None}
@@ -142,6 +167,14 @@ def cmd_synthesize_all(config_path: str, as_json: bool) -> None:
     processed: list[int] = []
 
     while True:
+        manifest = load_manifest(manifest_path)
+        recover_manifest_state(
+            config=config,
+            manifest=manifest,
+            manifest_path=manifest_path,
+            retry_failed=False,
+            merge_when_complete=True,
+        )
         manifest = load_manifest(manifest_path)
         next_index = find_next_chapter_index(manifest)
         if next_index is None:

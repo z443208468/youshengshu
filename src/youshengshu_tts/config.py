@@ -84,6 +84,18 @@ def validate_tts_config(config: TtsAppConfig) -> None:
             "supported=['sft', 'zero_shot', 'cross_lingual', 'instruct']"
         )
 
+    if config.cosyvoice.sample_rate != config.audio.sample_rate:
+        raise ValueError(
+            "cosyvoice.sample_rate 必须等于 audio.sample_rate；"
+            f"cosyvoice={config.cosyvoice.sample_rate}, audio={config.audio.sample_rate}"
+        )
+
+    if config.cosyvoice.max_retries < 1:
+        raise ValueError("cosyvoice.max_retries 必须 >= 1")
+
+    if config.cosyvoice.request_timeout_seconds < 1:
+        raise ValueError("cosyvoice.request_timeout_seconds 必须 >= 1")
+
 
 def save_tts_config(config: TtsAppConfig, path: str | Path) -> None:
     path = Path(path)

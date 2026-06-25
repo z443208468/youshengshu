@@ -207,7 +207,7 @@ export function TtsWorkbench({
   async function handleSynthesizeNext() {
     setTaskState("synthesizing");
     try {
-      appendTtsLog("开始生成下一个待处理章节。");
+      appendTtsLog("开始生成下一个待处理章节；已完成片段会自动跳过，失败/中断片段会自动续跑。");
       await runTtsCli({
         repoRoot: ttsSettings.repoRoot,
         pythonCommand,
@@ -230,7 +230,7 @@ export function TtsWorkbench({
   async function handleSynthesizeAll() {
     setTaskState("synthesizing");
     try {
-      appendTtsLog("开始连续生成待处理章节。");
+      appendTtsLog("开始连续生成待处理章节；已完成片段会自动跳过，失败/中断片段会自动续跑。");
       await runTtsCli({
         repoRoot: ttsSettings.repoRoot,
         pythonCommand,

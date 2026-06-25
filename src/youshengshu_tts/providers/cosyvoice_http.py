@@ -7,7 +7,7 @@ from requests.exceptions import ChunkedEncodingError, ConnectionError, ReadTimeo
 
 from .base import TtsProvider, TtsProviderResult
 from ..config import CosyVoiceHttpConfig
-from ..exceptions import TtsProviderError
+from ..exceptions import TtsProviderError, TtsTransientProviderError
 
 
 SUPPORTED_MODES = {"sft", "zero_shot", "cross_lingual", "instruct"}
@@ -100,13 +100,14 @@ class CosyVoiceHttpProvider(TtsProvider):
             try:
                 pcm = b"".join(response.iter_content(chunk_size=16000))
             except ChunkedEncodingError as exc:
-                raise TtsProviderError(
+                raise TtsTransientProviderError(
                     "CosyVoice GPU 生成流被服务端提前中断。"
-                    "当前最常见原因是服务端 CUDA/PyTorch/模型推理崩溃；"
-                    "请检查 CosyVoice 服务日志中的 no kernel image / CUDA / torch 错误。"
+                    "当前最常见原因是服务端 CUDA/PyTorch/模型推理崩溃、服务端进程被重启、"
+                    "或客户端读取 HTTP streaming 时连接被重置；"
+                    "该 segment 将在下次 resume 时重新生成。"
                 ) from exc
             except (ConnectionError, ReadTimeout) as exc:
-                raise TtsProviderError(f"CosyVoice HTTP stream 读取失败: {exc}") from exc
+                raise TtsTransientProviderError(f"CosyVoice HTTP stream 读取失败: {exc}") from exc
 
             if not pcm:
                 raise TtsProviderError("CosyVoice 返回空音频。")
