@@ -390,7 +390,7 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - TTS Workbench no longer surfaces raw server.py missing as final user action: PASS
 - clone_cosyvoice.bat and start_cosyvoice_api.bat are diagnostic only: PASS
 - bootstrapCosyVoiceRuntime no longer receives app pythonCommand as CosyVoice venv creator: PASS
-- Windows CosyVoice venv creation uses py -3.10: PASS
+- CosyVoice venv creator uses candidate Python resolver, not hardcoded py -3.10: PASS
 - wrong-version .cosyvoice_venv is deleted and recreated: PASS
 - bootstrap ProcessOutput.code is checked by TtsWorkbench before recheck/start: PASS
 - model completeness uses has_model_files, not only directory existence: PASS
@@ -400,7 +400,7 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - CosyVoice repo with missing runtime/python/fastapi/server.py is quarantined and recloned once: PASS
 - bootstrap no longer emits "Remove it or rename it before bootstrap": PASS
 - dev_check uses git grep -F -e for --bootstrap-python: PASS
-- dev_check checks exact return ["py", "-3.10"] string: PASS
+- dev_check enforces generic Python candidate resolver, not hardcoded py -3.10: PASS
 - ActiveCosyVoiceBootstrap is registered with Tauri .manage: PASS
 - check_cosyvoice_runtime is registered in invoke_handler: PASS
 - bootstrap_cosyvoice_runtime is registered in invoke_handler: PASS
@@ -408,9 +408,20 @@ Status Failure Diagnostics: Not triggered; status loaded successfully.
 - kill_cosyvoice_bootstrap takes child out of mutex before await kill: PASS
 - ModelScope fallback resets HuggingFace partial target dir before retry: PASS
 
+### CosyVoice Python Resolver Verification
+
+- Python version requirement comes from MODEL_PROFILES / required_python_version: PASS
+- Default required Python version is 3.10 because official CosyVoice install uses python=3.10: PASS
+- No local Python path such as C:/Python310/python.exe is hardcoded: PASS
+- py -3.10 is only a candidate, not a hard requirement: PASS
+- sys.executable is tested as a candidate: PASS
+- YSS_COSYVOICE_PYTHON override is supported: PASS
+- YSS_COSYVOICE_PYTHON_VERSION override is supported: PASS
+- run_step reports missing executable without raw WinError traceback: PASS
+
 ### Verification
 
-- python -m pytest -q: PASS (79 passed)
+- python -m pytest -q: PASS (82 passed)
 - python -m youshengshu_tts.cli --help: PASS
 - TTS doctor smoke: PASS
 - TTS synthesize with fake provider: PASS (pytest)

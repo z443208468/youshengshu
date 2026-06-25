@@ -22,8 +22,18 @@ MODEL_PROFILES = {
         "supported_modes": ["sft"],
         "default_mode": "sft",
         "default_spk_id": "中文女",
+        "python_version": "3.10",
     }
 }
+
+
+def required_python_version(model_profile: str = DEFAULT_MODEL_PROFILE) -> str:
+    env_version = os.environ.get("YSS_COSYVOICE_PYTHON_VERSION", "").strip()
+    if env_version:
+        return env_version
+
+    profile = MODEL_PROFILES[model_profile]
+    return profile["python_version"]
 
 BOOTSTRAP_POLL_INTERVAL_MS = 1000
 SERVICE_READY_TIMEOUT_SECONDS = 180

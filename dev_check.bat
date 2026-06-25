@@ -395,9 +395,45 @@ if %ERRORLEVEL% EQU 0 (
   exit /b 1
 )
 
-git grep -F -e "return [\"py\", \"-3.10\"]" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+git grep -F -e "def python_candidates" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] Windows CosyVoice venv creation must use py -3.10
+  echo [ERROR] bootstrap must define generic Python candidate resolver
+  exit /b 1
+)
+
+git grep -F -e "required_python_version" -- src/youshengshu_tts/runtime.py tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Python version requirement must come from runtime profile/helper
+  exit /b 1
+)
+
+git grep -F -e "YSS_COSYVOICE_PYTHON" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must allow YSS_COSYVOICE_PYTHON override
+  exit /b 1
+)
+
+git grep -F -e "YSS_COSYVOICE_PYTHON_VERSION" -- src/youshengshu_tts/runtime.py tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must allow YSS_COSYVOICE_PYTHON_VERSION override
+  exit /b 1
+)
+
+git grep -F -e "[sys.executable]" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] bootstrap must test current sys.executable as Python candidate
+  exit /b 1
+)
+
+git grep -F -e "Path(\"C:/Python310/python.exe\")" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] bootstrap must not hardcode C:/Python310/python.exe
+  exit /b 1
+)
+
+git grep -F -e "Path(\"C:/Program Files/Python310/python.exe\")" -- tools/tts/bootstrap_cosyvoice_runtime.py >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  echo [ERROR] bootstrap must not hardcode Program Files Python path
   exit /b 1
 )
 

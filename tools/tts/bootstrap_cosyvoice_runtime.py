@@ -16,6 +16,7 @@ from youshengshu_tts.runtime import (  # noqa: E402
     MODEL_PROFILES,
     check_cosyvoice_runtime,
     has_model_files,
+    required_python_version,
     runtime_paths,
 )
 
@@ -114,17 +115,88 @@ def ensure_fastapi_server(repo_root: Path) -> None:
     emit("fastapi_ok", "CosyVoice FastAPI server.py exists after repair", {"path": str(server_py)})
 
 
-def resolve_cosyvoice_venv_creator() -> list[str]:
-    if os.name == "nt":
-        return ["py", "-3.10"]
+def python_candidates(required_version: str) -> list[list[str]]:
+    candidates: list[list[str]] = []
 
-    if sys.version_info.major == 3 and sys.version_info.minor == 10:
-        return [sys.executable]
+    env_python = os.environ.get("YSS_COSYVOICE_PYTHON", "").strip()
+    if env_python:
+        candidates.append([env_python])
+
+    if os.name == "nt":
+        candidates.append(["py", f"-{required_version}"])
+
+    candidates.append([sys.executable])
+
+    if os.name == "nt":
+        candidates.append(["python"])
+        candidates.append(["python3"])
+    else:
+        candidates.append(["python3"])
+        candidates.append(["python"])
+
+    deduped: list[list[str]] = []
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        key = "\0".join(candidate)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(candidate)
+
+    return deduped
+
+
+def read_python_version_from_command(command: list[str]) -> str | None:
+    code = "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+
+    try:
+        result = subprocess.run(
+            [*command, "-c", code],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    version = result.stdout.strip()
+    return version or None
+
+
+def resolve_cosyvoice_venv_creator(model_profile: str) -> list[str]:
+    required_version = required_python_version(model_profile)
+    checked: list[dict[str, str]] = []
+
+    for candidate in python_candidates(required_version):
+        version = read_python_version_from_command(candidate)
+        checked.append({
+            "command": " ".join(candidate),
+            "version": version or "unavailable",
+        })
+
+        if version == required_version:
+            emit(
+                "python_runtime_selected",
+                "Selected Python runtime for CosyVoice venv creation",
+                {
+                    "required_version": required_version,
+                    "command": " ".join(candidate),
+                    "checked": checked,
+                },
+            )
+            return candidate
 
     raise RuntimeError(
-        f"CosyVoice requires Python 3.10 to create its runtime venv; "
-        f"current bootstrap Python is {sys.version_info.major}.{sys.version_info.minor}. "
-        "Install Python 3.10 or run bootstrap from Python 3.10."
+        "No compatible Python runtime found for CosyVoice; "
+        f"required_version={required_version}; "
+        f"checked={checked}. "
+        "Set YSS_COSYVOICE_PYTHON to a compatible Python executable, "
+        "or set YSS_COSYVOICE_PYTHON_VERSION only if CosyVoice requirements were verified for that version."
     )
 
 
@@ -138,37 +210,57 @@ def read_python_version(python_path: Path) -> str:
     ).strip()
 
 
-def ensure_venv(repo_root: Path, venv_creator: list[str]) -> Path:
+def ensure_venv(repo_root: Path, venv_creator: list[str], model_profile: str) -> Path:
     paths = runtime_paths(repo_root)
     venv_python = paths["venv_python"]
     venv_dir = paths["venv_dir"]
+    required_version = required_python_version(model_profile)
 
     if venv_python.exists():
         version = read_python_version(venv_python)
-        if version == "3.10":
+        if version == required_version:
             emit(
                 "venv_exists",
                 "CosyVoice venv already exists",
-                {"python": str(venv_python), "version": version},
+                {
+                    "python": str(venv_python),
+                    "version": version,
+                    "required_version": required_version,
+                },
             )
             return venv_python
 
         emit(
             "venv_recreate",
-            "Existing CosyVoice venv has wrong Python version; recreating",
-            {"python": str(venv_python), "version": version},
+            "Existing CosyVoice venv has incompatible Python version; recreating",
+            {
+                "python": str(venv_python),
+                "version": version,
+                "required_version": required_version,
+            },
         )
         shutil.rmtree(venv_dir)
 
-    emit("venv_create", "Creating CosyVoice isolated venv", {"venv": str(venv_dir)})
+    emit(
+        "venv_create",
+        "Creating CosyVoice isolated venv",
+        {
+            "venv": str(venv_dir),
+            "creator": " ".join(venv_creator),
+            "required_version": required_version,
+        },
+    )
     run_step([*venv_creator, "-m", "venv", str(venv_dir)])
 
     if not venv_python.exists():
         raise RuntimeError(f"CosyVoice venv python missing after create: {venv_python}")
 
     version = read_python_version(venv_python)
-    if version != "3.10":
-        raise RuntimeError(f"CosyVoice venv must be Python 3.10; got {version} at {venv_python}")
+    if version != required_version:
+        raise RuntimeError(
+            f"CosyVoice venv Python version mismatch; "
+            f"required={required_version}; got={version}; python={venv_python}"
+        )
 
     return venv_python
 
@@ -265,13 +357,13 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root)
-    venv_creator = resolve_cosyvoice_venv_creator()
+    venv_creator = resolve_cosyvoice_venv_creator(args.model_profile)
 
     emit("bootstrap_start", "CosyVoice bootstrap started", {"repo_root": str(repo_root)})
 
     ensure_repo(repo_root)
     ensure_fastapi_server(repo_root)
-    venv_python = ensure_venv(repo_root, venv_creator)
+    venv_python = ensure_venv(repo_root, venv_creator, args.model_profile)
     install_requirements(repo_root, venv_python)
     download_model(repo_root, venv_python, args.model_profile)
 

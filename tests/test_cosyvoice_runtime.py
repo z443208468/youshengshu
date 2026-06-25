@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from youshengshu_tts.runtime import check_cosyvoice_runtime, has_model_files
+from youshengshu_tts.runtime import check_cosyvoice_runtime, has_model_files, required_python_version
 
 _bootstrap_spec = importlib.util.spec_from_file_location(
     "bootstrap_cosyvoice_runtime",
@@ -97,3 +97,55 @@ def test_quarantine_path_moves_invalid_dir(tmp_path: Path) -> None:
     assert moved.exists()
     assert moved.name.startswith("CosyVoice.invalid.not_git_repo.")
     assert (moved / "junk.txt").exists()
+
+
+def test_resolve_cosyvoice_venv_creator_uses_required_version_and_fallbacks_to_sys_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+    import sys
+
+    calls: list[list[str]] = []
+
+    class Result:
+        def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_required_python_version(model_profile: str) -> str:
+        return "3.10"
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+
+        if args[0] == "py":
+            raise FileNotFoundError("py not found")
+
+        if args[0] == sys.executable:
+            return Result(0, "3.10\n")
+
+        return Result(1, "", "not compatible")
+
+    monkeypatch.setattr(_bootstrap_mod, "required_python_version", fake_required_python_version)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    selected = _bootstrap_mod.resolve_cosyvoice_venv_creator("cosyvoice_300m_sft")
+
+    assert selected == [sys.executable]
+    assert any(call[0] == "py" for call in calls)
+    assert any(call[0] == sys.executable for call in calls)
+
+
+def test_required_python_version_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YSS_COSYVOICE_PYTHON_VERSION", "3.11")
+
+    assert required_python_version("cosyvoice_300m_sft") == "3.11"
+
+
+def test_python_candidates_do_not_hardcode_local_python_path() -> None:
+    candidates = _bootstrap_mod.python_candidates("3.10")
+    rendered = [" ".join(candidate) for candidate in candidates]
+
+    assert "C:/Python310/python.exe" not in rendered
+    assert "C:/Program Files/Python310/python.exe" not in rendered
