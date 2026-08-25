@@ -1,192 +1,399 @@
-# youshengshu (有声书)
+# Youshengshu（有声书工作台）
 
-小说 TXT 分章节 + 调用 LM Studio 批量翻译的本地工具系统。
+一个面向长篇小说的本地 AI 有声书制作工具。
 
-## 用途
+它把 **文本分章 → 本地 LLM 翻译 → 中文稿管理 → TTS 配音 → 音频合并** 放在同一个桌面工作台里，适合处理长篇小说、同人文和其他需要批量翻译与语音生成的长文本内容。
 
-本程序将一个 AO3 导出的英文长篇小说 TXT 文件：
+当前主要支持 Windows，本地模型通过 LM Studio 和 CosyVoice 运行。
 
-1. **分章节**：按 AO3 章节标题自动切分为单个英文章节文件。
-2. **批量翻译**：通过 LM Studio 本地 API 调用本地 LLM，逐章翻译为中文。
-3. **断点续跑**：翻译进度保存在 manifest 中，中断后可从中断处继续。
+---
 
-## 为什么源文和译文不被提交到 GitHub
+## 产品功能
 
-- 原文和译文可能涉及版权。
-- 文本文件可能很大，不应污染仓库。
-- GitHub 仓库只保存程序、配置、测试和 README。
+### 1. 小说自动分章节
 
-## 安装
+导入长篇 TXT 后，程序可以自动识别章节并拆分成独立文件。
 
-```bash
-git clone https://github.com/z443208468/youshengshu.git
-cd youshengshu
+支持：
 
-python -m venv .venv
-.venv\Scripts\activate
+- 按章节标题自动切分
+- 检查章节编号是否连续
+- 过滤目录、短文本等无效章节
+- 自动生成英文分章文件
+- 自动创建翻译任务清单（Manifest）
 
-pip install -r requirements.txt
+适合把一个完整长篇文本整理成可逐章处理的结构。
+
+---
+
+### 2. 本地 AI 批量翻译
+
+通过 LM Studio 调用本地 LLM，对拆分后的章节进行批量英译中。
+
+支持：
+
+- 自动识别 LM Studio 当前加载的模型
+- 逐章翻译
+- 连续翻译所有待处理章节
+- 只翻译下一章
+- 指定章节单独翻译
+- 查看当前翻译进度
+- 失败章节单独重试
+- 翻译结果自动保存到中文章节目录
+
+程序默认按段落批次发送给模型。如果当前批次超出模型上下文窗口，会自动缩小批次后继续尝试。
+
+例如：
+
+```text
+8 个段落
+  ↓ 上下文溢出
+4 个段落
+  ↓ 上下文溢出
+2 个段落
+  ↓ 成功
 ```
 
-## LM Studio 设置
+不会为了继续运行而静默截断原文。
 
-1. 打开 LM Studio
-2. 加载任意本地模型
-3. 进入 Developer / Local Server 页面
-4. 点击 Start Server
-5. 确认服务器地址为 `http://localhost:1234/v1`
+---
 
-LM Studio 当前加载什么模型，程序就调用什么模型。如果加载了多个模型，默认使用列表中的第一个。
+### 3. 翻译断点续跑
 
-## 输入文件
+长篇小说翻译通常需要运行很长时间，因此翻译任务支持断点恢复。
 
-将你的 AO3 导出的英文小说 TXT 放入 `data/input/` 目录，例如：
+如果出现：
 
-```
-data/input/ReZero_Watching_Him_Die.txt
-```
+- LM Studio 超时
+- 模型报错
+- 程序关闭
+- 电脑重启
+- 翻译中途手动停止
 
-如需修改输入文件路径，请编辑 `config/default_config.json` 中的 `paths.input_file`。
+重新运行后可以从已经完成的位置继续，而不需要整章重新翻译。
 
-## 使用
+程序会保存：
 
-### 分章节
+- 已完成段落数量
+- 已完成 batch 数量
+- 当前 partial 译文
+- Resume State
+- 源文件 SHA-256
 
-```bash
-python -m src.youshengshu.cli split --config config/default_config.json
-```
+如果原文后来被修改，旧断点不会被错误继续使用。
 
-输出到 `data/en_chapters/` 目录，例如 `chapter_001_en.txt`。
+---
 
-### 查看翻译进度
+### 4. 翻译进度管理
 
-```bash
-python -m src.youshengshu.cli status --config config/default_config.json
-```
+桌面端和 CLI 都可以查看每章状态。
 
-### 批量翻译
+状态包括：
 
-```bash
-python -m src.youshengshu.cli translate --config config/default_config.json
-```
-
-输出到 `data/cn_chapters/` 目录，例如 `chapter_001_cn.txt`。
-
-### 一次完成所有操作
-
-```bash
-python -m src.youshengshu.cli all --config config/default_config.json
+```text
+pending       待处理
+in_progress   处理中
+done          已完成
+failed        失败
 ```
 
-### 续跑
+可以查看：
 
-翻译过程中如果中断，直接重新运行 translate 命令：
+- 总章节数
+- 已完成章节数
+- 待处理章节数
+- 失败章节数
+- 当前处理章节
+- 每章翻译进度
+- 失败原因
+- partial 文件位置
 
-```bash
-python -m src.youshengshu.cli translate --config config/default_config.json
+---
+
+### 5. 中文文本 TTS 配音
+
+翻译完成后，可以直接把中文章节送入 TTS 模块生成有声书音频。
+
+当前使用 CosyVoice HTTP Provider。
+
+支持：
+
+- 单个 TXT 作为 TTS 输入
+- 整个中文章节目录作为 TTS 输入
+- 自动创建 TTS 项目
+- 自动切分长文本
+- 单章生成
+- 生成下一章
+- 连续生成所有待处理章节
+- 查看每章 TTS 状态
+- 自动输出 WAV 文件
+
+---
+
+### 6. 多种 CosyVoice 模式
+
+当前支持：
+
+- `sft`
+- `zero_shot`
+- `cross_lingual`
+- `instruct`
+
+可以根据模式配置：
+
+- speaker ID
+- prompt text
+- prompt audio
+- instruct text
+
+用于不同的声音和生成方式。
+
+---
+
+### 7. TTS 文本自动切段
+
+为了避免整章一次送入模型导致失败，程序会先把中文章节拆成适合语音生成的小段。
+
+默认会根据：
+
+- 目标字符长度
+- 最大字符长度
+- 中文标点
+
+自动切分。
+
+默认配置示例：
+
+```json
+{
+  "target_chars_min": 80,
+  "target_chars_max": 180,
+  "hard_chars_max": 240,
+  "punctuation": "。！？；……\n"
+}
 ```
 
-程序会自动跳过已完成的章节，从中断处继续。
+---
 
-## 输出位置
+### 8. TTS 断点恢复
 
-| 内容 | 路径 |
-|------|------|
-| 英文分章 | `data/en_chapters/chapter_XXX_en.txt` |
-| 中文译文 | `data/cn_chapters/chapter_XXX_cn.txt` |
-| 翻译进度 | `data/manifests/translation_manifest.json` |
+每个 TTS segment 都单独记录状态。
 
-## 配置文件说明
+例如一章被拆成 100 个 segment：
 
-配置文件 `config/default_config.json` 包含以下参数：
-
-### 路径配置 (paths)
-- `input_file`: 输入 TXT 文件路径
-- `en_chapters_dir`: 英文分章输出目录
-- `cn_chapters_dir`: 中文译文输出目录
-- `manifest_file`: 翻译进度文件路径
-
-### 章节切分 (chapter_split)
-- `strict_chapter_sequence`: 是否检查章节序号连续
-- `min_valid_chapter_chars`: 有效章节最小字符数（用于过滤目录条目）
-
-### LM Studio 配置 (lmstudio)
-- `base_url`: LM Studio API 地址
-- `model_id`: 模型 ID (`auto` 表示自动检测当前加载的模型)
-- `temperature`: 生成温度 (0.2)
-- `max_output_tokens`: 最大输出 token 数 (4096)
-- `request_timeout_seconds`: 请求超时时间 (600)
-- `max_retries`: 失败重试次数 (3)
-
-### Token 预算 (chunking)
-- `context_tokens`: 模型上下文窗口 (8192, 8k 基准)
-- `reserved_prompt_tokens`: 提示词预留 (1800)
-- `reserved_output_tokens`: 输出预留 (4096)
-- `safety_ratio`: 安全系数 (0.72)
-- `english_chars_per_token`: 英文每 token 字符数 (4.0)
-- `cjk_chars_per_token`: 中文每 token 字符数 (1.2)
-
-## 常见问题
-
-### LM Studio 当前没有模型
-
-先在 LM Studio 里加载模型，并启动 Local Server。
-
-### 翻译太慢
-
-换更小的量化模型，或者降低 `max_output_tokens`，但不要随意增大 chunk。
-
-### 输出中途停止
-
-降低 `config/default_config.json` 中 `context_tokens` 或 `reserved_output_tokens`，或换更短的 chunk 预算。
-
-### 翻译质量不好
-
-换更强模型；不要用过小模型直接跑全书；先跑一章抽查。
-
-### 使用 Qwen3 模型
-
-如果你使用 Qwen3 系列模型，可以在提示词中加入 `/no_think` 来禁用思考输出。本程序默认不加。
-
-## CLI JSON 输出
-
-CLI 支持机器可读的 JSON 输出，供桌面 UI 使用。
-
-### 分章节 --json
-
-```bash
-python -m src.youshengshu.cli split --config config/default_config.json --json
+```text
+001 ✓
+002 ✓
+003 ✓
+...
+057 ✓
+058 生成失败
 ```
 
-输出 JSON 包含 `source`、`chapters`、`en_chapters_dir`、`manifest_file`。
+重新运行后会从未完成的位置继续，而不是重新生成前 57 段。
 
-### 查看进度 --json
+程序恢复时会检查实际 WAV 文件，而不是只看 Manifest 状态。
 
-```bash
-python -m src.youshengshu.cli status --config config/default_config.json --json
+---
+
+### 9. WAV 校验与章节合并
+
+TTS 输出后会检查音频文件是否有效。
+
+包括：
+
+- WAV 文件是否存在
+- PCM 数据是否为空
+- int16 数据是否对齐
+- sample rate 是否符合配置
+- 音频是否可正常读取
+
+所有 segment 完成后，会自动合并为章节级 WAV。
+
+---
+
+### 10. 桌面图形界面
+
+项目包含基于 **Tauri v2 + React + TypeScript** 的桌面应用。
+
+桌面端可以直接完成主要操作，无需手动输入 CLI 命令。
+
+当前界面包含：
+
+#### 翻译模块
+
+- 选择原始 TXT
+- 设置英文分章目录
+- 设置中文译文目录
+- 设置 Manifest 路径
+- 保存配置
+- 系统诊断
+- 分章节
+- 刷新翻译状态
+- 连续翻译待处理章节
+- 翻译下一章
+- 指定章节翻译
+- 停止当前任务
+- 查看章节表格
+- 查看实时日志
+- 打开输出目录
+
+#### TTS 模块
+
+- 检查 CosyVoice 服务状态
+- 配置 TTS 输入路径
+- 配置音频输出目录
+- 配置 Provider 参数
+- 选择 prompt audio
+- 创建 TTS 项目
+- 查看 TTS 进度
+- 生成指定章节
+- 生成下一章节
+- 连续生成所有待处理章节
+- 查看生成日志
+- 打开音频输出位置
+
+#### RVC 模块
+
+RVC 目前只有工作台入口，实际 Voice Conversion pipeline 尚未完成。
+
+---
+
+### 11. 系统诊断
+
+Translation 和 TTS 都提供 Doctor / Diagnostics 功能。
+
+可以检查：
+
+- Python 环境
+- 配置文件
+- 输入文件
+- 输出目录
+- Manifest
+- LM Studio 服务
+- CosyVoice Runtime
+- 本地运行环境
+
+桌面端启动后也会显示当前系统是否满足执行条件。
+
+---
+
+### 12. 实时日志与错误信息
+
+桌面端会显示 Python / TTS 执行过程中的实时日志。
+
+包括：
+
+- 当前执行命令
+- 模型名称
+- 当前章节
+- 当前 batch / segment
+- 请求失败信息
+- 上下文溢出
+- Resume 状态
+- 输出路径
+- 错误原因
+
+方便定位长任务运行过程中出现的问题。
+
+---
+
+## 典型使用流程
+
+### 英文小说 → 中文译文 → 有声书
+
+```text
+1. 导入长篇英文 TXT
+        ↓
+2. 自动分章节
+        ↓
+3. LM Studio 本地模型逐章翻译
+        ↓
+4. 检查 / 续跑失败章节
+        ↓
+5. 得到中文章节目录
+        ↓
+6. 创建 TTS 项目
+        ↓
+7. 自动切分中文文本
+        ↓
+8. CosyVoice 批量生成音频
+        ↓
+9. 自动恢复失败 segment
+        ↓
+10. 合并为章节 WAV
 ```
 
-输出 JSON 包含 `total`、`done`、`pending`、`failed`、`in_progress`、`next_chapter`、`chapters` 数组等详细信息。
+---
 
-### 仅翻译指定章数
+## 技术栈
 
-```bash
-python -m src.youshengshu.cli translate --config config/default_config.json --max-chapters 1
+### AI / Runtime
+
+- LM Studio
+- OpenAI-compatible API
+- CosyVoice
+- CUDA / PyTorch
+
+### Backend
+
+- Python
+- OpenAI Python SDK
+- Requests
+- pytest
+
+### Desktop
+
+- Tauri v2
+- Rust
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+
+---
+
+## 项目结构
+
+```text
+youshengshu/
+├─ config/
+│  ├─ default_config.json
+│  └─ tts_config.json
+├─ src/
+│  ├─ youshengshu/          # 分章 / 翻译 / Resume / Manifest
+│  └─ youshengshu_tts/      # TTS / Segment / Resume / Provider
+├─ desktop/
+│  ├─ src/                  # React UI
+│  └─ src-tauri/            # Tauri / Rust backend
+├─ tests/
+├─ scripts/
+├─ requirements.txt
+├─ dev_check.bat
+└─ run_youshengshu.bat
 ```
 
-`--max-chapters` 指定最大翻译章节数（0 表示全部）。可用于先试跑一章。
+---
 
-## 图形界面（桌面 UI）
+## 快速启动
 
-项目附带一个基于 **Tauri v2 + React + TypeScript + shadcn/ui** 的桌面图形界面。
+### 环境要求
 
-### 前置要求
+- Windows
+- Python 3
+- Node.js / npm
+- Rust / Cargo
+- Visual Studio Build Tools / Windows SDK
+- LM Studio（翻译）
+- CosyVoice Runtime（TTS）
 
-- Node.js >= 18
-- Rust 工具链（含 cargo）
-- Windows 平台需要 Windows SDK（Visual Studio Build Tools 或 VS 2022）
+### 启动桌面端
 
-### 启动
+```bat
+run_youshengshu.bat
+```
+
+或者：
 
 ```bash
 cd desktop
@@ -194,18 +401,187 @@ npm install
 npm run tauri dev
 ```
 
-### 功能
+---
 
-- 路径设置：图形化选择原始 TXT 文件、英文分章目录、中文译文目录、manifest 路径
-- 项目根目录自动识别
-- 一键分章节、开始翻译、刷新状态、翻译下一章
-- 章节进度状态卡片和表格
-- 实时日志控制台
-- 打开英文/中文目录
-- 支持停止当前翻译任务
+## Translation CLI
 
-### 注意
+### 安装依赖
 
-- CLI 和 UI 共用同一套 `config/default_config.json` 配置
-- UI 不会提交原文和译文
-- UI 调用的是现有 Python 后端，不重写翻译逻辑
+```bash
+git clone https://github.com/z443208468/youshengshu.git
+cd youshengshu
+
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 系统诊断
+
+```bash
+python -m src.youshengshu.cli --config config/default_config.json doctor
+```
+
+### 分章节
+
+```bash
+python -m src.youshengshu.cli --config config/default_config.json split
+```
+
+### 查看状态
+
+```bash
+python -m src.youshengshu.cli --config config/default_config.json status
+```
+
+### 连续翻译所有待处理章节
+
+```bash
+python -m src.youshengshu.cli --config config/default_config.json translate
+```
+
+### 只翻译下一章
+
+```bash
+python -m src.youshengshu.cli --config config/default_config.json translate --max-chapters 1
+```
+
+### 指定章节
+
+```bash
+python -m src.youshengshu.cli --config config/default_config.json translate --chapter-index 4
+```
+
+---
+
+## TTS CLI
+
+### 系统诊断
+
+```bash
+python -m src.youshengshu_tts.cli --config config/tts_config.json doctor
+```
+
+### 创建项目
+
+```bash
+python -m src.youshengshu_tts.cli --config config/tts_config.json create-project
+```
+
+### 查看状态
+
+```bash
+python -m src.youshengshu_tts.cli --config config/tts_config.json status
+```
+
+### 生成指定章节
+
+```bash
+python -m src.youshengshu_tts.cli --config config/tts_config.json synthesize --chapter-index 1
+```
+
+### 生成下一章
+
+```bash
+python -m src.youshengshu_tts.cli --config config/tts_config.json synthesize-next
+```
+
+### 连续生成全部章节
+
+```bash
+python -m src.youshengshu_tts.cli --config config/tts_config.json synthesize-all
+```
+
+---
+
+## 为什么长任务可以恢复
+
+项目为 Translation 和 TTS 分别维护持久化状态。
+
+Translation 保存 paragraph batch 级 Resume State；TTS 保存 segment 级 Manifest，并在恢复时重新检查实际产物。
+
+关键文件使用临时文件后 replace 的方式写入，降低程序中断后留下损坏正式文件的概率。
+
+这部分主要用于解决本地 AI 长任务中常见的：
+
+- 模型超时
+- 上下文溢出
+- GPU / TTS 服务崩溃
+- 客户端断开
+- 程序被关闭
+- 部分文件已经生成但任务没有完整结束
+
+---
+
+## 测试
+
+Python：
+
+```bash
+pytest
+```
+
+前端：
+
+```bash
+cd desktop
+npm run build
+```
+
+Rust：
+
+```bash
+cd desktop/src-tauri
+cargo check
+cargo test
+```
+
+Windows 开发环境也可以运行：
+
+```bat
+dev_check.bat
+```
+
+---
+
+## 当前状态
+
+### 已实现
+
+- [x] 长篇 TXT 分章节
+- [x] LM Studio 本地模型翻译
+- [x] 翻译进度管理
+- [x] 翻译断点续跑
+- [x] Context overflow 自动退避
+- [x] 指定章节 / 下一章 / 连续翻译
+- [x] TTS 文本切段
+- [x] CosyVoice TTS
+- [x] 多种 CosyVoice 模式
+- [x] TTS segment 级恢复
+- [x] WAV 校验
+- [x] 章节音频合并
+- [x] Tauri 桌面端
+- [x] 实时日志
+- [x] 系统诊断
+- [x] CLI JSON 输出
+
+### 未完成 / 计划中
+
+- [ ] RVC Voice Conversion pipeline
+- [ ] 更多 TTS Provider
+- [ ] 自动 CI
+- [ ] 更完整的跨平台支持
+
+---
+
+## 数据与版权
+
+仓库不提交：
+
+- 原始小说全文
+- 完整翻译文本
+- 生成音频
+- CosyVoice 模型文件
+- 其他大型运行时文件
+
+仓库主要保存程序代码、配置、测试和开发工具。
