@@ -218,8 +218,6 @@ TTS 输出后会检查音频文件是否有效。
 
 桌面端可以直接完成主要操作，无需手动输入 CLI 命令。
 
-当前界面包含：
-
 #### 翻译模块
 
 - 选择原始 TXT
@@ -491,25 +489,6 @@ python -m src.youshengshu_tts.cli --config config/tts_config.json synthesize-nex
 ```bash
 python -m src.youshengshu_tts.cli --config config/tts_config.json synthesize-all
 ```
-
----
-
-## 为什么长任务可以恢复
-
-项目为 Translation 和 TTS 分别维护持久化状态。
-
-Translation 保存 paragraph batch 级 Resume State；TTS 保存 segment 级 Manifest，并在恢复时重新检查实际产物。
-
-关键文件使用临时文件后 replace 的方式写入，降低程序中断后留下损坏正式文件的概率。
-
-这部分主要用于解决本地 AI 长任务中常见的：
-
-- 模型超时
-- 上下文溢出
-- GPU / TTS 服务崩溃
-- 客户端断开
-- 程序被关闭
-- 部分文件已经生成但任务没有完整结束
 
 ---
 
